@@ -1,0 +1,13 @@
+/target/
+/.idea/
+/.vscode/
+/.vs/
+*.swp
+*.swo
+*.exe
+*.pdb
+*.msi
+*.msix
+Thumbs.db
+Desktop.ini
+.DS_Store

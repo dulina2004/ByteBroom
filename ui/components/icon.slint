@@ -1,0 +1,54 @@
+export enum Glyph { none, logo, dashboard, scan, cleanup, settings, drive, used, free, spark }
+
+component StrokeIcon inherits Path {
+    in property <color> ink;
+    viewbox-width: 24;
+    viewbox-height: 24;
+    stroke: root.ink;
+    stroke-width: 1.65px;
+}
+
+export component Icon inherits Rectangle {
+    in property <Glyph> glyph;
+    in property <color> ink;
+    in property <length> size: 18px;
+    width: root.size;
+    height: root.size;
+
+    if root.glyph == Glyph.logo: StrokeIcon {
+        ink: root.ink;
+        commands: "M 13 13 L 19 5 M 5 16 L 10 11 Q 11 10 13 12 L 17 16 L 15 20 H 4 Z M 7 17 L 6 20 M 11 17 L 10 20 M 5 6 V 10 M 3 8 H 7";
+    }
+    if root.glyph == Glyph.dashboard: StrokeIcon {
+        ink: root.ink;
+        commands: "M 4 4 H 10 V 10 H 4 Z M 14 4 H 20 V 10 H 14 Z M 4 14 H 10 V 20 H 4 Z M 14 14 H 20 V 20 H 14 Z";
+    }
+    if root.glyph == Glyph.scan: StrokeIcon {
+        ink: root.ink;
+        commands: "M 16 10 A 6 6 0 1 1 4 10 A 6 6 0 1 1 16 10 M 14.5 14.5 L 20 20";
+    }
+    if root.glyph == Glyph.cleanup: StrokeIcon {
+        ink: root.ink;
+        commands: "M 5 7 H 19 M 9 7 V 4 H 15 V 7 M 7 7 L 8 20 H 16 L 17 7 M 10 10 V 17 M 14 10 V 17";
+    }
+    if root.glyph == Glyph.settings: StrokeIcon {
+        ink: root.ink;
+        commands: "M 4 6 H 20 M 4 12 H 20 M 4 18 H 20 M 8 3 V 9 M 15 9 V 15 M 10 15 V 21";
+    }
+    if root.glyph == Glyph.drive: StrokeIcon {
+        ink: root.ink;
+        commands: "M 6 5 H 18 L 21 13 V 19 H 3 V 13 Z M 3 13 H 21 M 6 16 H 8 M 10 16 H 12";
+    }
+    if root.glyph == Glyph.used: StrokeIcon {
+        ink: root.ink;
+        commands: "M 4 20 H 20 M 6 17 V 13 M 10 17 V 9 M 14 17 V 11 M 18 17 V 5";
+    }
+    if root.glyph == Glyph.free: StrokeIcon {
+        ink: root.ink;
+        commands: "M 4 4 H 20 V 20 H 4 Z M 8 12 L 11 15 L 17 9";
+    }
+    if root.glyph == Glyph.spark: StrokeIcon {
+        ink: root.ink;
+        commands: "M 11 3 L 13.5 9.5 L 20 12 L 13.5 14.5 L 11 21 L 8.5 14.5 L 2 12 L 8.5 9.5 Z M 19 3 V 7 M 17 5 H 21";
+    }
+}

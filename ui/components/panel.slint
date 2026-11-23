@@ -1,0 +1,45 @@
+import { Theme } from "../theme.slint";
+import { Glyph, Icon } from "icon.slint";
+
+export component Panel inherits Rectangle {
+    border-radius: 12px;
+    border-width: 1px;
+    border-color: Theme.stroke;
+    background: Theme.surface;
+}
+
+export component PanelHeading inherits Text {
+    color: Theme.text;
+    font-size: 18px;
+    font-weight: 650;
+}
+
+export component SecondaryText inherits Text {
+    color: Theme.secondary;
+    font-size: 14px;
+    wrap: word-wrap;
+}
+
+export component EmptyState inherits Panel {
+    in property <Glyph> glyph;
+    in property <string> title;
+    in property <string> detail;
+    min-height: 190px;
+    vertical-stretch: 0;
+
+    VerticalLayout {
+        alignment: center;
+        padding: 24px;
+        spacing: 8px;
+
+        Rectangle {
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            background: Theme.raised;
+            Icon { glyph: root.glyph; ink: Theme.accent; size: 22px; }
+        }
+        PanelHeading { text: root.title; horizontal-alignment: center; }
+        SecondaryText { text: root.detail; horizontal-alignment: center; }
+    }
+}

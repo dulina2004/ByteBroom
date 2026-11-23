@@ -1,0 +1,103 @@
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { Page, Sidebar } from "components/sidebar.slint";
+import { SecondaryText } from "components/panel.slint";
+import { DashboardPage, DriveCardData } from "pages/dashboard.slint";
+import { ScanPage } from "pages/scan.slint";
+import { CleanupPage } from "pages/cleanup.slint";
+import { SettingsPage } from "pages/settings.slint";
+
+export { DriveCardData }
+
+component MockLabel inherits Rectangle {
+    height: 28px;
+    width: 104px;
+    border-radius: 14px;
+    border-width: 1px;
+    border-color: #336158;
+    background: #1a3534;
+
+    HorizontalLayout {
+        spacing: 6px;
+        alignment: center;
+        Rectangle { width: 6px; height: 6px; border-radius: 3px; background: Theme.reclaimable; }
+        Text { text: "Mock data"; color: Theme.reclaimable; font-size: 12px; font-weight: 650; vertical-alignment: center; }
+    }
+}
+
+export component AppWindow inherits Window {
+    in property <[DriveCardData]> drives;
+    in property <string> total-space;
+    in property <string> used-space;
+    in property <string> free-space;
+    in property <string> reclaimable-space;
+    in property <string> app-version;
+    private property <Page> active-page: Page.dashboard;
+
+    title: "ByteBroom";
+    background: Theme.canvas;
+    preferred-width: 1100px;
+    preferred-height: 720px;
+    min-width: 870px;
+    min-height: 480px;
+    default-font-size: 14px;
+
+    HorizontalLayout {
+        Sidebar {
+            current-page: root.active-page;
+            navigate(page) => {
+                root.active-page = page;
+                content.content-y = 0px;
+            }
+        }
+
+        content := ScrollView {
+            accessible-role: main;
+            accessible-label: "Page content";
+            horizontal-stretch: 1;
+            horizontal-scrollbar-policy: always-off;
+            content-width: self.visible-width;
+
+            VerticalLayout {
+                padding: 32px;
+                spacing: 26px;
+                alignment: start;
+
+                VerticalLayout {
+                    spacing: 6px;
+                    HorizontalLayout {
+                        spacing: 12px;
+                        Text {
+                            text: root.active-page == Page.dashboard ? "Dashboard" :
+                                root.active-page == Page.scan ? "Scan" :
+                                root.active-page == Page.cleanup ? "Cleanup" : "Settings";
+                            color: Theme.text;
+                            font-size: 34px;
+                            font-weight: 720;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                        MockLabel { }
+                    }
+                    SecondaryText {
+                        text: root.active-page == Page.dashboard ? "Explore storage on two sample drives." :
+                            root.active-page == Page.scan ? "Preview the options for a future read-only scan." :
+                            root.active-page == Page.cleanup ? "Preview where cleanup candidates will appear for review." :
+                            "View the default appearance and application version.";
+                    }
+                }
+
+                if root.active-page == Page.dashboard: DashboardPage {
+                    drives: root.drives;
+                    total-space: root.total-space;
+                    used-space: root.used-space;
+                    free-space: root.free-space;
+                    reclaimable-space: root.reclaimable-space;
+                }
+                if root.active-page == Page.scan: ScanPage { }
+                if root.active-page == Page.cleanup: CleanupPage { }
+                if root.active-page == Page.settings: SettingsPage { app-version: root.app-version; }
+            }
+        }
+    }
+}

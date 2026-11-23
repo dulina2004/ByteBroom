@@ -1,0 +1,41 @@
+import { Theme } from "../theme.slint";
+import { Panel, PanelHeading, SecondaryText } from "../components/panel.slint";
+
+component SettingRow inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> value;
+    min-height: 26px;
+    spacing: 12px;
+
+    SecondaryText { text: root.label; vertical-alignment: center; horizontal-stretch: 1; }
+    Text { text: root.value; color: Theme.text; font-size: 14px; vertical-alignment: center; }
+}
+
+export component SettingsPage inherits VerticalLayout {
+    in property <string> app-version;
+    spacing: 16px;
+    alignment: start;
+
+    Panel {
+        min-height: 108px;
+        vertical-stretch: 0;
+        VerticalLayout {
+            padding: 17px;
+            spacing: 8px;
+            alignment: center;
+            PanelHeading { text: "Appearance"; }
+            SettingRow { label: "Theme"; value: "Dark (preview default)"; }
+        }
+    }
+    Panel {
+        min-height: 110px;
+        vertical-stretch: 0;
+        VerticalLayout {
+            padding: 17px;
+            spacing: 8px;
+            alignment: center;
+            PanelHeading { text: "About ByteBroom"; }
+            SettingRow { label: "Version"; value: root.app-version; }
+        }
+    }
+}

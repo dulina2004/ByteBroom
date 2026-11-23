@@ -1,0 +1,36 @@
+import { Button, ComboBox } from "std-widgets.slint";
+import { Glyph } from "../components/icon.slint";
+import { Panel, PanelHeading, SecondaryText, EmptyState } from "../components/panel.slint";
+
+export component ScanPage inherits VerticalLayout {
+    spacing: 16px;
+    alignment: start;
+
+    Panel {
+        min-height: 120px;
+        vertical-stretch: 0;
+        VerticalLayout {
+            padding: 17px;
+            spacing: 9px;
+            alignment: center;
+            PanelHeading { text: "Scan location"; }
+            HorizontalLayout {
+                alignment: start;
+                spacing: 10px;
+                ComboBox {
+                    min-width: 170px;
+                    enabled: false;
+                    model: ["Example drive C:"];
+                    current-index: 0;
+                }
+                Button { text: "Scan not implemented"; enabled: false; }
+            }
+        }
+    }
+
+    EmptyState {
+        glyph: Glyph.scan;
+        title: "No scan results";
+        detail: "Results will appear here after a scan.";
+    }
+}

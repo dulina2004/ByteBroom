@@ -1,0 +1,163 @@
+import { Theme } from "../theme.slint";
+import { Glyph, Icon } from "../components/icon.slint";
+import { Panel, PanelHeading, SecondaryText } from "../components/panel.slint";
+
+export struct DriveCardData {
+    letter: string,
+    name: string,
+    total: string,
+    used: string,
+    free: string,
+    reclaimable: string,
+    used-ratio: float,
+    reclaimable-ratio: float,
+}
+
+component MetricCard inherits Panel {
+    in property <Glyph> glyph;
+    in property <string> label;
+    in property <string> value;
+    in property <color> ink: Theme.accent;
+    min-width: 130px;
+    height: 122px;
+    horizontal-stretch: 1;
+
+    VerticalLayout {
+        padding: 15px;
+        spacing: 7px;
+        alignment: start;
+        Rectangle {
+            width: 28px;
+            height: 28px;
+            border-radius: 7px;
+            background: Theme.raised;
+            Icon { glyph: root.glyph; ink: root.ink; size: 16px; }
+        }
+        Text { text: root.label; color: Theme.secondary; font-size: 12px; }
+        Text { text: root.value; color: root.ink; font-size: 25px; font-weight: 700; }
+    }
+}
+
+component DriveValue inherits VerticalLayout {
+    in property <string> label;
+    in property <string> value;
+    in property <color> ink: Theme.text;
+    horizontal-stretch: 1;
+    spacing: 3px;
+    Text { text: root.label; color: Theme.secondary; font-size: 12px; }
+    Text { text: root.value; color: root.ink; font-size: 15px; font-weight: 650; }
+}
+
+component DriveCard inherits Panel {
+    in property <DriveCardData> drive;
+    min-width: 265px;
+    height: 170px;
+    horizontal-stretch: 1;
+
+    VerticalLayout {
+        padding: 17px;
+        spacing: 14px;
+        alignment: start;
+
+        HorizontalLayout {
+            spacing: 10px;
+            Rectangle {
+                width: 34px;
+                height: 34px;
+                border-radius: 8px;
+                background: Theme.raised;
+                Icon { glyph: Glyph.drive; ink: Theme.accent; }
+            }
+            VerticalLayout {
+                alignment: center;
+                spacing: 1px;
+                horizontal-stretch: 1;
+                Text {
+                    text: root.drive.name + " (" + root.drive.letter + ")";
+                    color: Theme.text;
+                    font-size: 15px;
+                    font-weight: 650;
+                }
+                Text { text: root.drive.total + " capacity"; color: Theme.secondary; font-size: 12px; }
+            }
+        }
+
+        Rectangle {
+            height: 10px;
+            border-radius: 5px;
+            background: Theme.free;
+            clip: true;
+
+            Rectangle {
+                x: 0;
+                width: parent.width * (root.drive.used-ratio - root.drive.reclaimable-ratio);
+                background: Theme.used;
+            }
+            Rectangle {
+                x: parent.width * (root.drive.used-ratio - root.drive.reclaimable-ratio);
+                width: parent.width * root.drive.reclaimable-ratio;
+                background: Theme.reclaimable;
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 10px;
+            DriveValue { label: "Used"; value: root.drive.used; }
+            DriveValue { label: "Free"; value: root.drive.free; }
+            DriveValue { label: "Reclaimable"; value: root.drive.reclaimable; ink: Theme.reclaimable; }
+        }
+    }
+}
+
+component LegendItem inherits HorizontalLayout {
+    in property <string> label;
+    in property <color> ink;
+    spacing: 6px;
+    alignment: start;
+    Rectangle { width: 9px; height: 9px; border-radius: 3px; background: root.ink; }
+    Text { text: root.label; color: Theme.secondary; font-size: 12px; vertical-alignment: center; }
+}
+
+export component DashboardPage inherits VerticalLayout {
+    in property <[DriveCardData]> drives;
+    in property <string> total-space;
+    in property <string> used-space;
+    in property <string> free-space;
+    in property <string> reclaimable-space;
+    spacing: 20px;
+    alignment: start;
+
+    VerticalLayout {
+        spacing: 12px;
+        PanelHeading { text: "Storage overview"; }
+        HorizontalLayout {
+            spacing: 12px;
+            MetricCard { glyph: Glyph.drive; label: "Total disk space"; value: root.total-space; ink: Theme.text; }
+            MetricCard { glyph: Glyph.used; label: "Used space"; value: root.used-space; }
+            MetricCard { glyph: Glyph.free; label: "Free space"; value: root.free-space; ink: Theme.text; }
+            MetricCard {
+                glyph: Glyph.spark;
+                label: "Potentially reclaimable";
+                value: root.reclaimable-space;
+                ink: Theme.reclaimable;
+            }
+        }
+    }
+
+    VerticalLayout {
+        spacing: 12px;
+        PanelHeading { text: "Example drives"; }
+        HorizontalLayout {
+            spacing: 12px;
+            for drive in root.drives: DriveCard { drive: drive; }
+        }
+        HorizontalLayout {
+            spacing: 18px;
+            alignment: start;
+            LegendItem { label: "Other used"; ink: Theme.used; }
+            LegendItem { label: "Potentially reclaimable"; ink: Theme.reclaimable; }
+            LegendItem { label: "Free"; ink: Theme.free; }
+        }
+        SecondaryText { text: "Potentially reclaimable space is included in used space."; }
+    }
+}

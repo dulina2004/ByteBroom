@@ -1,0 +1,137 @@
+import { Theme } from "../theme.slint";
+import { Glyph, Icon } from "icon.slint";
+
+export enum Page { dashboard, scan, cleanup, settings }
+
+component NavigationItem inherits Rectangle {
+    in property <string> label;
+    in property <Glyph> glyph;
+    in property <bool> selected;
+    callback activated();
+
+    height: 42px;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: keys.has-focus ? Theme.accent : transparent;
+    background: root.selected ? Theme.selected : pointer.has-hover ? Theme.raised : transparent;
+
+    accessible-role: tab;
+    accessible-label: root.label;
+    accessible-item-selected: root.selected;
+    accessible-action-default => { root.activated(); }
+    forward-focus: keys;
+
+    keys := FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.Return || event.text == " " {
+                root.activated();
+                accept
+            } else {
+                reject
+            }
+        }
+    }
+
+    if root.selected: Rectangle {
+        x: 0;
+        width: 3px;
+        height: 18px;
+        y: (parent.height - self.height) / 2;
+        border-radius: 2px;
+        background: Theme.accent;
+    }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 10px;
+        Icon {
+            glyph: root.glyph;
+            ink: root.selected ? Theme.accent : Theme.secondary;
+        }
+        Text {
+            text: root.label;
+            color: root.selected ? Theme.text : Theme.secondary;
+            font-size: 14px;
+            font-weight: root.selected ? 650 : 500;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            accessible-role: none;
+        }
+    }
+
+    pointer := TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => {
+            keys.focus();
+            root.activated();
+        }
+    }
+}
+
+export component Sidebar inherits Rectangle {
+    in property <Page> current-page;
+    callback navigate(Page);
+    width: 206px;
+    background: Theme.sidebar;
+    accessible-role: navigation;
+    accessible-label: "Main navigation";
+
+    Rectangle {
+        x: parent.width - 1px;
+        width: 1px;
+        height: parent.height;
+        background: Theme.stroke;
+    }
+
+    VerticalLayout {
+        padding: 16px;
+        padding-top: 30px;
+        spacing: 28px;
+        alignment: start;
+        HorizontalLayout {
+            padding-left: 4px;
+            spacing: 11px;
+            Rectangle {
+                width: 38px;
+                height: 38px;
+                border-radius: 10px;
+                background: @linear-gradient(135deg, #34457d 0%, #202b55 100%);
+                border-color: #465889;
+                border-width: 1px;
+                Icon { glyph: Glyph.logo; ink: #d6e0ff; size: 24px; }
+            }
+            Text {
+                text: "ByteBroom";
+                font-size: 19px;
+                font-weight: 730;
+                color: Theme.text;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+        }
+        VerticalLayout {
+            spacing: 5px;
+            NavigationItem {
+                label: "Dashboard"; glyph: Glyph.dashboard;
+                selected: root.current-page == Page.dashboard;
+                activated => { root.navigate(Page.dashboard); }
+            }
+            NavigationItem {
+                label: "Scan"; glyph: Glyph.scan;
+                selected: root.current-page == Page.scan;
+                activated => { root.navigate(Page.scan); }
+            }
+            NavigationItem {
+                label: "Cleanup"; glyph: Glyph.cleanup;
+                selected: root.current-page == Page.cleanup;
+                activated => { root.navigate(Page.cleanup); }
+            }
+            NavigationItem {
+                label: "Settings"; glyph: Glyph.settings;
+                selected: root.current-page == Page.settings;
+                activated => { root.navigate(Page.settings); }
+            }
+        }
+    }
+}

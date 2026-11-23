@@ -1,0 +1,12 @@
+import { Glyph } from "../components/icon.slint";
+import { EmptyState } from "../components/panel.slint";
+
+export component CleanupPage inherits VerticalLayout {
+    alignment: start;
+
+    EmptyState {
+        glyph: Glyph.cleanup;
+        title: "No cleanup candidates";
+        detail: "Once scanning is available, review candidate files and their sizes here.";
+    }
+}
