@@ -67,17 +67,10 @@ impl Directory {
             return Err(invalid_root());
         }
         let mut anchor = match prefix.kind() {
-            Prefix::Disk(letter) | Prefix::VerbatimDisk(letter) => {
+            Prefix::Disk(letter) | Prefix::VerbatimDisk(letter)
+                if crate::windows_fs::native_volume(letter) =>
+            {
                 OsString::from(format!("\\\\?\\{}:\\", char::from(letter)))
-            }
-            Prefix::UNC(server, share) | Prefix::VerbatimUNC(server, share) => {
-                let mut base = OsString::from(r"\\?\UNC\");
-                for component in [server, share] {
-                    wide_component(component)?;
-                    base.push(component);
-                    base.push("\\");
-                }
-                base
             }
             _ => return Err(invalid_root()),
         };
@@ -87,7 +80,7 @@ impl Directory {
         let mut components = components.peekable();
         anchor.push(OsStr::new("\0"));
         let anchor = anchor.encode_wide().collect::<Vec<_>>();
-        // SAFETY: anchor is a terminated drive/share root. OPEN_EXISTING and access rights
+        // SAFETY: anchor is a terminated local drive root. OPEN_EXISTING and access rights
         // permit only traversal, metadata, and optionally enumeration of an existing directory.
         let handle = unsafe {
             CreateFileW(
@@ -396,7 +389,7 @@ fn valid_component(name: &[u16]) -> bool {
 fn invalid_root() -> io::Error {
     io::Error::new(
         io::ErrorKind::InvalidInput,
-        "Choose an absolute Windows drive or folder path.",
+        "Choose an absolute folder path on a direct local Windows drive.",
     )
 }
 

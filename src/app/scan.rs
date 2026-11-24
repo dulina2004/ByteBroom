@@ -14,6 +14,7 @@ use crate::{
     storage::format_bytes,
 };
 
+use super::analyzer::Analyzer;
 use super::artifacts::{Browser, Catalog};
 use super::{AppWindow, DirectoryDisplay, ScanDisplay, ScanPhase};
 #[cfg(windows)]
@@ -33,6 +34,7 @@ pub(super) struct ScanController {
     timer: Timer,
     closing: Cell<bool>,
     artifacts: Rc<Browser>,
+    analyzer: Rc<Analyzer>,
     #[cfg(windows)]
     storage: Rc<StorageView>,
 }
@@ -40,14 +42,14 @@ pub(super) struct ScanController {
 enum Job {
     Picking(JoinHandle<Result<Option<PathBuf>, String>>),
     Scanning {
-        worker: JoinHandle<(ScanResult, Catalog)>,
+        worker: JoinHandle<(ScanResult, Catalog, Option<crate::analysis::Catalog>)>,
         cancellation: Arc<Cancellation>,
         progress: Arc<Mutex<ScanProgress>>,
         started: Instant,
     },
     #[cfg(windows)]
     Development {
-        worker: JoinHandle<Inventory>,
+        worker: JoinHandle<(Inventory, [crate::analysis::Dataset; 6])>,
         cancellation: Arc<Cancellation>,
         progress: Arc<Mutex<Progress>>,
         generation: u64,
@@ -60,6 +62,7 @@ impl ScanController {
     pub(super) fn attach(window: &AppWindow) -> Rc<Self> {
         let controller = Rc::new(Self {
             artifacts: Browser::attach(window),
+            analyzer: Analyzer::attach(window),
             #[cfg(windows)]
             storage: StorageView::attach(window),
             ..Self::default()
@@ -85,6 +88,12 @@ impl ScanController {
         window.on_cancel_scan(move || {
             if let Some(window) = ui.upgrade() {
                 scan.cancel(&window);
+            }
+        });
+        let (scan, ui) = (Rc::clone(&controller), window.as_weak());
+        window.on_analysis_rescan(move || {
+            if let (Some(window), Some(path)) = (ui.upgrade(), scan.analyzer.scan_path()) {
+                scan.start(&window, path);
             }
         });
         let (scan, ui) = (Rc::clone(&controller), window.as_weak());
@@ -145,11 +154,13 @@ impl ScanController {
         let worker = thread::Builder::new()
             .name("development-storage".into())
             .spawn(move || {
-                task.run(&worker_cancellation, |snapshot| {
+                let inventory = task.run(&worker_cancellation, |snapshot| {
                     if let Ok(mut latest) = worker_progress.lock() {
                         *latest = snapshot;
                     }
-                })
+                });
+                let analysis = crate::analysis::global_data(&inventory);
+                (inventory, analysis)
             });
         match worker {
             Ok(worker) => {
@@ -196,8 +207,9 @@ impl ScanController {
                             *latest = snapshot;
                         }
                     });
+                let analysis = crate::analysis::Catalog::from_scan(&mut result);
                 let catalog = Catalog::new(std::mem::take(&mut result.developer));
-                (result, catalog)
+                (result, catalog, analysis)
             });
         match worker {
             Ok(worker) => {
@@ -358,7 +370,10 @@ impl ScanController {
             }
             Job::Scanning { worker, .. } => {
                 match worker.join() {
-                    Ok((result, catalog)) => {
+                    Ok((result, catalog, analysis)) => {
+                        if let Some(analysis) = analysis {
+                            self.analyzer.scan(window, analysis);
+                        }
                         self.artifacts.replace(window, catalog);
                         show_result(window, result);
                     }
@@ -375,12 +390,15 @@ impl ScanController {
                 discovery,
                 ..
             } => {
+                let result = worker.join().map(|(inventory, analysis)| {
+                    self.analyzer.global(window, analysis);
+                    inventory
+                });
                 self.storage.finish(
                     window,
                     generation,
                     discovery,
-                    worker
-                        .join()
+                    result
                         .map_err(|_| "The development storage worker stopped unexpectedly.".into()),
                 );
                 if self.closing.get() {
@@ -451,6 +469,30 @@ fn show_error(window: &AppWindow, message: String) {
 }
 
 fn show_result(window: &AppWindow, result: ScanResult) {
+    #[cfg(windows)]
+    {
+        use std::path::{Component, Prefix};
+        let mut parts = result.root.components();
+        if let (Some(Component::Prefix(prefix)), Some(Component::RootDir), None) =
+            (parts.next(), parts.next(), parts.next())
+            && let Prefix::Disk(letter) | Prefix::VerbatimDisk(letter) = prefix.kind()
+        {
+            window.set_last_analyzed_drive(
+                format!("{}:", char::from(letter.to_ascii_uppercase())).into(),
+            );
+            window.set_last_drive_analysis(
+                match result.outcome {
+                    ScanOutcome::Completed if result.progress.inaccessible == 0 => {
+                        "Analysis completed"
+                    }
+                    ScanOutcome::Completed => "Partial analysis",
+                    ScanOutcome::Cancelled => "Analysis cancelled",
+                    ScanOutcome::Failed(_) => "Analysis unavailable",
+                }
+                .into(),
+            );
+        }
+    }
     window.set_scan_root(result.root.to_string_lossy().as_ref().into());
     window.set_scan_progress(display(result.progress));
     let directories = result

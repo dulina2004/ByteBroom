@@ -8,11 +8,19 @@ ByteBroom aims to help developers understand how dependencies, build artifacts, 
 
 The dashboard shows the drive letters visible to the current Windows session, with volume labels when available, drive types, capacities, and usage. Select **Refresh** to update the snapshot. Totals reflect the listed drive letters. Capacities use binary units such as GiB and TiB.
 
-Select **Scan** on a drive card or **Scan a folder…** to start a read-only metadata scan. The Scan page shows live counts and elapsed time, then lists up to twelve of the largest immediate subdirectories. Select **Cancel Scan** to stop and keep partial results. The scanner reports inaccessible entries and skips symbolic links, junctions, mount points, and other reparse points.
+Select **Analyze** on a drive card or **Scan a folder…** to start a read-only metadata scan. The Scan page shows live counts and elapsed time, then lists up to twelve of the largest immediate subdirectories. Select **Cancel Scan** to stop and keep partial results. The scanner reports inaccessible entries and skips symbolic links, junctions, mount points, and other reparse points. Scanning accepts direct local Windows drives.
 
 Scan totals sum logical file lengths, which can differ from allocated disk space. Each hard-linked name counts as a separate entry. Results reflect the metadata seen during the scan as the filesystem changes.
 
 The desktop shell uses Rust 2024 and Slint 1.19.0 with the Winit backend and Slint's native software renderer. Cargo compiles the Slint files during the build.
+
+## Storage Analyzer
+
+Select **View analyzer** after a scan. Click a treemap tile or choose its row to inspect it. Use **Explore folder** and the breadcrumbs to navigate retained summaries. At the retained depth limit, **Analyze this folder** starts an explicit read-only scan of that folder. Search, size presets, category and status filters, and sorting apply to the current view.
+
+Choose **Projects**, **Developer artifacts**, or **Project ecosystems** to compare detected artifact sizes. The global modes use the latest Development Storage inventory and group it by tool, ecosystem, drive, category, or risk. The dashboard separately reports Windows capacity and flags drives at 90% and 97% usage.
+
+ByteBroom keeps the latest two folder scans in memory and compares them when they have the same verified scope and complete measurements. [How to interpret the Analyzer](docs/storage-analyzer.md)
 
 ## Developer Artifacts
 

@@ -8,7 +8,7 @@ use std::{
 
 use windows_sys::{
     Win32::{
-        Storage::FileSystem::{GetLogicalDrives, QueryDosDeviceW},
+        Storage::FileSystem::GetLogicalDrives,
         System::Com::CoTaskMemFree,
         UI::Shell::{
             FOLDERID_LocalAppData, FOLDERID_Profile, FOLDERID_ProgramData, FOLDERID_RoamingAppData,
@@ -22,7 +22,10 @@ use super::{
     model::Identity,
     providers::{Environment, VARIABLES},
 };
-use crate::scanner::{Cancellation, windows::Directory};
+use crate::{
+    scanner::{Cancellation, windows::Directory},
+    windows_fs::native_volume,
+};
 
 pub(super) fn environment() -> Environment {
     Environment {
@@ -68,32 +71,6 @@ fn local_drives() -> Vec<char> {
         .filter(|&letter| mask & (1 << (letter - b'A')) != 0 && native_volume(letter))
         .map(char::from)
         .collect()
-}
-
-fn native_volume(letter: u8) -> bool {
-    let input = [u16::from(letter.to_ascii_uppercase()), u16::from(b':'), 0];
-    let mut output = [0_u16; 1024];
-    // SAFETY: the drive name is terminated and the output buffer has the supplied length.
-    // This queries the local DOS device table before any path on that drive is opened.
-    let length =
-        unsafe { QueryDosDeviceW(input.as_ptr(), output.as_mut_ptr(), output.len() as u32) };
-    if length == 0 {
-        return false;
-    }
-    let name = output.split(|&value| value == 0).next().unwrap_or_default();
-    // Admit ordinary native volume mappings. Redirectors and SUBST mappings can hide
-    // network shares or reparse points before the scanner has validated any path.
-    let native = |prefix: &str| {
-        name.iter()
-            .copied()
-            .zip(prefix.encode_utf16())
-            .all(|(left, right)| left == right)
-            && name.len() > prefix.len()
-            && name[prefix.len()..]
-                .iter()
-                .all(|&unit| (u16::from(b'0')..=u16::from(b'9')).contains(&unit))
-    };
-    native("\\Device\\HarddiskVolume") || native("\\Device\\Ramdisk")
 }
 
 pub(crate) fn drive(path: &Path) -> Option<char> {
@@ -152,8 +129,7 @@ pub(super) fn open(
     path: &Path,
     cancellation: &Cancellation,
 ) -> io::Result<Option<(Directory, Identity)>> {
-    let local = drive(path).is_some_and(|letter| native_volume(letter as u8));
-    if !local {
+    if drive(path).is_none() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "Only direct local-volume directories can be measured.",

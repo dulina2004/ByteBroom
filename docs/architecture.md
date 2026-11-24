@@ -12,6 +12,8 @@ ByteBroom is a single Cargo package, `bytebroom`. It uses Slint at runtime, `sli
 | `src/storage/windows.rs`                        | Queries drive letters, types, labels, and capacity from Win32.                                       |
 | `src/scanner/`                                 | Traverses Windows directories and returns plain Rust progress, statistics, and results.               |
 | `src/global_caches/`                           | Resolves known developer storage, validates local paths, and schedules selected measurement roots.   |
+| `src/analysis/`                                | Builds disjoint analysis views, bounded hierarchy snapshots, comparisons, and treemap geometry.      |
+| `src/app/analyzer.rs`                           | Maps analysis snapshots to paginated Slint models and coalesces search and resize events.             |
 | `src/app/development.rs`                       | Presents the inventory, selection, filters, and paginated results in Slint.                          |
 | `src/app/scan.rs` and `src/app/folder_picker.rs` | Coordinate one scan or folder picker at a time and present the results in Slint.                      |
 | `build.rs`                                      | Compiles `ui/app-window.slint` with Slint's dark Fluent style for standard widgets.                  |
@@ -24,7 +26,7 @@ The Windows adapter queries drive roots and suppresses Windows critical-error di
 
 ## Read-only filesystem scanning
 
-The scanner uses a depth-first stack of open directories with one fixed-size metadata buffer per active depth. It counts logical lengths from directory records, retains at most twelve immediate-child summaries, and never opens file contents. The Windows adapter opens each child by name relative to a validated parent handle and checks the opened handle for reparse points before listing it. It applies those checks to the selected folder's ancestors too. Unavailable child entries are recoverable, while failure to open or read the scan root ends the scan.
+The scanner uses a depth-first stack of open directories with one fixed-size metadata buffer per active depth. It counts logical lengths from directory records and retains bounded directory summaries. The Windows adapter accepts direct local drive mappings and opens each child by name relative to a validated parent handle. It checks opened handles for reparse points, including the selected folder's ancestors. Unavailable child entries are recoverable, while failure to open or read the scan root ends the scan.
 
 A background worker replaces a single progress snapshot at most about eight times per second. A Slint timer polls that snapshot through weak handles and joins the worker after it exits. Cancellation sets an atomic flag and asks Windows to cancel pending synchronous I/O. Providers that cannot interrupt a request can delay the final cancelled state. Closing the application during a scan requests cancellation and keeps the window responsive until the worker stops.
 
@@ -53,3 +55,13 @@ Each discovered descendant has its own boundary. The shared walker skips separat
 The shared scan controller runs one folder picker, project scan, discovery, or measurement job at a time. Worker threads replace a progress snapshot and the Slint timer polls it. Storage scan IDs guard against stale updates. Preview scope shows selected drives before measurement. Rust owns the in-memory inventory and filters, and Slint displays up to ten rows per page. Risk, confidence, and measurement status are separate fields.
 
 See the [provider guide](development-storage.md) for adding location rules and fixtures.
+
+## Storage Analyzer
+
+Each project scan collects directory summaries in the existing traversal. It retains the largest twelve children of the root and six children per retained folder for the next two levels. This caps each published hierarchy at 517 nodes. Relative names share their parent context, and full paths are built from the retained route as needed. Each expanded node has disjoint child, direct-file, and omitted-child buckets. Unavailable entries affect completeness and contribute only the bytes actually observed.
+
+The scan worker builds project, artifact, and ecosystem projections from the detector results. Each artifact has one owning project and one ecosystem for byte accounting. Multi-ecosystem projects may appear in more than one ecosystem's project count. The global scan worker builds separate resource, tool, ecosystem, drive, category, and risk projections. Project and global measurements can overlap and remain separate from each other and from Windows capacity.
+
+The UI retains two project scan snapshots and the current global analysis. It browses up to 512 rows per view, renders twelve rows per page, and debounces search and resize. Rust computes the treemap by deterministic balanced binary splits along the longest axis. At most 80 tiles reach Slint. Smaller positive-size rows are grouped for chart display, and zero or unknown sizes stay in the list. Geometry uses viewport-relative coordinates and is recalculated after a resize settles.
+
+Comparison checks the verified volume, directory ID, and normalized root path. Only complete scans are eligible. Root totals cover all measured data. If either snapshot omits children, per-directory comparison uses the intersection of both retained lists. Scan snapshots remain in memory, and local export is planned.

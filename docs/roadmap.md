@@ -23,10 +23,15 @@
 - Implemented selection by location, scoped measurement, cancellation, and paginated browsing with risk and measurement details.
 - Provider discovery covers documented defaults, supported environment overrides, and session-only custom locations. Configuration files, portable layouts, and some version-specific paths remain open. [Provider coverage](development-storage.md)
 
+## Storage Analyzer
+
+- Implemented bounded directory exploration, native treemaps, filtered analysis views, and comparisons for two compatible in-memory directory scans.
+- Added project, artifact, ecosystem, and global resource views. File Explorer integration, report export, and more advanced filters are deferred. [Analyzer guide](storage-analyzer.md)
+
 ## Later milestones
 
 - Evaluate additional detector rules against representative fixtures and measure artifact detection overhead on large trees.
 - Design protected, host-only Docker and WSL storage reporting.
 - Evaluate allocated-size reporting and combined project/global accounting. Benchmark low-memory and cancellation behavior with synthetic large caches.
-- Design an explicit review and confirmation flow for cleanup, including exclusions and an assessment of recoverable removal options.
+- Feature 06 will focus on safe cleanup planning and execution, with explicit review, exclusions, confirmation, and recoverable removal options.
 - Validate the Windows build on a clean machine and settle licensing before distributing it. Add packaging and signing, then validate the core and GUI on Linux and macOS.

@@ -1,6 +1,6 @@
-use crate::detectors::Results;
 #[cfg(windows)]
 use crate::detectors::{Collector, Context, Measurement};
+use crate::{analysis::Folder, detectors::Results};
 use std::{
     ffi::OsString,
     io,
@@ -15,6 +15,8 @@ pub(crate) mod tests;
 pub(crate) mod windows;
 
 pub(crate) const TOP_DIRECTORIES: usize = 12;
+#[cfg(windows)]
+pub(crate) const SUMMARY_DEPTH: usize = 3;
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(125);
 
 pub(crate) struct ScanRequest {
@@ -61,11 +63,16 @@ pub(crate) enum ScanOutcome {
     Failed(io::Error),
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct ScopeIdentity(pub(crate) u64, pub(crate) [u8; 16], pub(crate) PathBuf);
+
 #[derive(Debug)]
 pub(crate) struct ScanResult {
     pub(crate) root: PathBuf,
     pub(crate) progress: ScanProgress,
     pub(crate) top_directories: Vec<DirectorySize>,
+    pub(crate) hierarchy: Option<Folder>,
+    pub(crate) identity: Option<ScopeIdentity>,
     pub(crate) outcome: ScanOutcome,
     pub(crate) developer: Results,
 }
@@ -86,7 +93,8 @@ fn scan_with_interval(
 ) -> ScanResult {
     let mut scan = Traversal {
         progress: ScanProgress::default(),
-        top: Vec::with_capacity(TOP_DIRECTORIES),
+        hierarchy: None,
+        identity: None,
         #[cfg(windows)]
         developer: Some(Collector::default()),
         #[cfg(windows)]
@@ -118,10 +126,21 @@ fn scan_with_interval(
     scan.progress.artifact_candidates = developer.artifacts.len();
     scan.progress.elapsed = scan.started.elapsed();
     report(scan.progress);
+    let top_directories = scan
+        .hierarchy
+        .iter()
+        .flat_map(|root| &root.children)
+        .map(|child| DirectorySize {
+            name: child.name.clone(),
+            logical_bytes: child.measurement.logical_bytes,
+        })
+        .collect();
     ScanResult {
         root: request.root,
         progress: scan.progress,
-        top_directories: scan.top,
+        top_directories,
+        hierarchy: scan.hierarchy,
+        identity: scan.identity,
         outcome,
         developer,
     }
@@ -129,7 +148,8 @@ fn scan_with_interval(
 
 struct Traversal {
     progress: ScanProgress,
-    top: Vec<DirectorySize>,
+    hierarchy: Option<Folder>,
+    identity: Option<ScopeIdentity>,
     #[cfg(windows)]
     developer: Option<Collector>,
     #[cfg(windows)]
@@ -140,20 +160,6 @@ struct Traversal {
 }
 
 impl Traversal {
-    #[cfg(windows)]
-    fn rank_directory(&mut self, child: DirectorySize) {
-        let index = self.top.partition_point(|previous| {
-            previous.logical_bytes > child.logical_bytes
-                || (previous.logical_bytes == child.logical_bytes && previous.name <= child.name)
-        });
-        if index < TOP_DIRECTORIES {
-            if self.top.len() == TOP_DIRECTORIES {
-                self.top.pop();
-            }
-            self.top.insert(index, child);
-        }
-    }
-
     #[cfg(windows)]
     fn report_if_due(&mut self, report: &mut impl FnMut(ScanProgress)) {
         let elapsed = self.started.elapsed();
@@ -176,6 +182,10 @@ fn traverse(
     let Some(root) = windows::Directory::open_root(&request.root, cancellation)? else {
         return Ok(());
     };
+    scan.identity = root
+        .identity()
+        .ok()
+        .map(|(volume, file, path)| ScopeIdentity(volume, file, path));
     walk(root, request.root.clone(), None, cancellation, scan, report)
 }
 
@@ -199,7 +209,8 @@ fn walk(
         if cancellation.is_cancelled() {
             break;
         }
-        let is_root = stack.len() == 1;
+        let depth = stack.len();
+        let is_root = depth == 1;
         let directory = stack.last_mut().expect("directory stack is not empty");
         let entry = directory.directory.next(
             scan.developer.is_some() && directory.context.wants_file_evidence(),
@@ -215,6 +226,7 @@ fn walk(
                 directory.measurement.files += 1;
                 directory.measurement.logical_bytes =
                     directory.measurement.logical_bytes.saturating_add(bytes);
+                directory.direct_bytes = directory.direct_bytes.saturating_add(bytes);
                 directory.context.file(evidence);
                 if disk && let Some(avd) = &mut scan.avd {
                     avd.disk_bytes = avd.disk_bytes.saturating_add(bytes);
@@ -248,7 +260,9 @@ fn walk(
                             path.file_name(),
                             scan.progress.directories,
                         );
-                        let tracked = examine || is_root;
+                        let tracked = examine
+                            || is_root
+                            || scan.developer.is_some() && depth <= SUMMARY_DEPTH;
                         if tracked {
                             path.push(component.unwrap_or_else(|| OsString::from_wide(&name)));
                         }
@@ -263,6 +277,7 @@ fn walk(
                 }
             }
             result => {
+                let finished = result.is_ok();
                 if let Err(error) = result {
                     if is_root {
                         root_error = Some(error);
@@ -271,7 +286,7 @@ fn walk(
                     scan.progress.inaccessible += 1;
                     directory.measurement.inaccessible += 1;
                 }
-                finish_frame(&mut stack, &mut path, scan, true);
+                finish_frame(&mut stack, &mut path, scan, finished);
             }
         }
         scan.report_if_due(report);
@@ -287,6 +302,10 @@ struct Frame<'a> {
     directory: windows::Directory,
     context: Context,
     measurement: Measurement,
+    direct_bytes: u64,
+    children: Vec<Folder>,
+    omitted: u64,
+    omitted_count: u64,
     tracked: bool,
     exclusions: Option<&'a Exclusions>,
 }
@@ -306,6 +325,10 @@ impl<'a> Frame<'a> {
                 directories: 1,
                 ..Measurement::default()
             },
+            direct_bytes: 0,
+            children: Vec::new(),
+            omitted: 0,
+            omitted_count: 0,
             tracked,
             exclusions,
         }
@@ -319,7 +342,7 @@ fn finish_frame(
     scan: &mut Traversal,
     finished: bool,
 ) {
-    let frame = stack.pop().expect("directory stack is not empty");
+    let mut frame = stack.pop().expect("directory stack is not empty");
     let measured = frame.measurement;
     if let Some(collector) = &mut scan.developer {
         let findings = collector.observe(
@@ -334,17 +357,27 @@ fn finish_frame(
     }
     if stack.len() == 1
         && let Some(name) = path.file_name()
+        && let Some(avd) = &mut scan.avd
+        && name.as_encoded_bytes().eq_ignore_ascii_case(b"snapshots")
     {
-        if scan.developer.is_some() {
-            scan.rank_directory(DirectorySize {
-                name: name.to_owned(),
-                logical_bytes: measured.logical_bytes,
-            });
-        }
-        if let Some(avd) = &mut scan.avd
-            && name.as_encoded_bytes().eq_ignore_ascii_case(b"snapshots")
-        {
-            avd.snapshot_bytes = Some(measured.logical_bytes);
+        avd.snapshot_bytes = Some(measured.logical_bytes);
+    }
+    if scan.developer.is_some() && stack.len() <= SUMMARY_DEPTH {
+        let folder = Folder {
+            name: path.file_name().unwrap_or(path.as_os_str()).to_owned(),
+            measurement: measured,
+            direct_bytes: frame.direct_bytes,
+            omitted_bytes: frame.omitted,
+            omitted_count: frame.omitted_count,
+            expanded: stack.len() < SUMMARY_DEPTH,
+            complete: finished && measured.inaccessible == 0,
+            children: std::mem::take(&mut frame.children),
+        };
+        let limit = if stack.len() == 1 { TOP_DIRECTORIES } else { 6 };
+        if let Some(parent) = stack.last_mut() {
+            parent.retain(folder, limit);
+        } else {
+            scan.hierarchy = Some(folder);
         }
     }
     if frame.tracked {
@@ -358,6 +391,36 @@ fn finish_frame(
         parent.measurement.files += measured.files;
         parent.measurement.directories += measured.directories;
         parent.measurement.inaccessible += measured.inaccessible;
+    }
+}
+
+#[cfg(windows)]
+impl Frame<'_> {
+    fn retain(&mut self, folder: Folder, limit: usize) {
+        let index = self.children.partition_point(|item| {
+            (
+                std::cmp::Reverse(item.measurement.logical_bytes),
+                &item.name,
+            ) <= (
+                std::cmp::Reverse(folder.measurement.logical_bytes),
+                &folder.name,
+            )
+        });
+        let omitted = if index < limit {
+            let omitted = (self.children.len() == limit)
+                .then(|| self.children.pop())
+                .flatten();
+            self.children.insert(index, folder);
+            omitted
+        } else {
+            Some(folder)
+        };
+        if let Some(omitted) = omitted {
+            self.omitted = self
+                .omitted
+                .saturating_add(omitted.measurement.logical_bytes);
+            self.omitted_count += 1;
+        }
     }
 }
 
@@ -403,7 +466,8 @@ pub(crate) fn measure(
 ) -> (ScanProgress, ScanOutcome, Option<AvdSizes>) {
     let mut scan = Traversal {
         progress: ScanProgress::default(),
-        top: Vec::new(),
+        hierarchy: None,
+        identity: None,
         developer: None,
         avd: avd.then(AvdSizes::default),
         started: Instant::now(),

@@ -7,13 +7,48 @@ import { DirectoryDisplay, ScanDisplay, ScanPage, ScanPhase } from "pages/scan.s
 import { CleanupPage } from "pages/cleanup.slint";
 import { SettingsPage } from "pages/settings.slint";
 import { ArtifactDetails, ArtifactFilter, ArtifactPage, ArtifactRow, ArtifactSummary } from "pages/artifacts.slint";
+import { AnalysisCard, AnalysisDetail, AnalysisEntry, AnalysisFilter, AnalysisTile, AnalyzerPage } from "pages/analyzer.slint";
 import { DevelopmentPage, StorageDetails, StorageFilter, StorageGroup, StoragePhase, StorageRow, StorageSummary } from "pages/development.slint";
 
 export { DirectoryDisplay, DriveCardData, ScanDisplay, ScanPhase }
 export { ArtifactDetails, ArtifactFilter, ArtifactRow, ArtifactSummary }
+export { AnalysisCard, AnalysisDetail, AnalysisEntry, AnalysisFilter, AnalysisTile }
 export { StorageDetails, StorageFilter, StorageGroup, StoragePhase, StorageRow, StorageSummary }
 
 export component AppWindow inherits Window {
+    in property <int> analysis-mode;
+    in property <int> analysis-snapshot;
+    in property <int> analysis-selected: -1;
+    in property <[string]> analysis-snapshots;
+    in property <[string]> analysis-trail;
+    in property <[string]> analysis-facets;
+    in property <[AnalysisCard]> analysis-cards;
+    in property <[AnalysisEntry]> analysis-rows;
+    in property <[AnalysisTile]> analysis-tiles;
+    in property <AnalysisFilter> analysis-filter;
+    in property <AnalysisDetail> analysis-details;
+    in property <string> analysis-root;
+    in property <string> analysis-notice;
+    in property <string> analysis-matches;
+    in property <string> analysis-page-label;
+    in property <bool> analysis-previous-page;
+    in property <bool> analysis-next-page;
+    in property <bool> analysis-available;
+    in property <bool> analysis-limited;
+    in property <[string]> analysis-comparison;
+    in property <string> analysis-comparison-note;
+    callback analysis-mode-changed(int);
+    callback analysis-snapshot-changed(int);
+    callback analysis-select(int);
+    callback analysis-breadcrumb(int);
+    callback analysis-page(int);
+    callback analysis-filter-changed(AnalysisFilter);
+    callback analysis-resize(float, float);
+    callback analysis-enter();
+    callback analysis-rescan();
+    callback analysis-forget-previous();
+    in property <string> last-analyzed-drive;
+    in property <string> last-drive-analysis;
     in property <[DriveCardData]> drives;
     in property <string> total-space;
     in property <string> used-space;
@@ -121,6 +156,7 @@ export component AppWindow inherits Window {
                         Text {
                             text: root.active-page == Page.dashboard ? "Dashboard" :
                                 root.active-page == Page.scan ? "Scan" :
+                                root.active-page == Page.analyzer ? "Storage Analyzer" :
                                 root.active-page == Page.artifacts ? "Developer Artifacts" :
                                 root.active-page == Page.development ? "Development Storage" :
                                 root.active-page == Page.cleanup ? "Cleanup" : "Settings";
@@ -130,7 +166,7 @@ export component AppWindow inherits Window {
                             vertical-alignment: center;
                             horizontal-stretch: 1;
                         }
-                        if root.active-page == Page.dashboard || root.active-page == Page.scan: Button {
+                        if root.active-page == Page.dashboard || root.active-page == Page.scan || root.active-page == Page.analyzer: Button {
                             text: root.picking-scan-folder ? "Opening picker…" : "Scan a folder…";
                             enabled: !root.scan-busy;
                             height: 34px;
@@ -150,6 +186,7 @@ export component AppWindow inherits Window {
                     SecondaryText {
                         text: root.active-page == Page.dashboard ? "View capacity and free space for your Windows drives." :
                             root.active-page == Page.scan ? "Measure logical file sizes in a drive or folder." :
+                            root.active-page == Page.analyzer ? "Explore where measured storage is concentrated." :
                             root.active-page == Page.artifacts ? "Explore detected dependencies, caches, and build output." :
                             root.active-page == Page.development ? "Discover and measure shared caches, installed tools, and local environment data." :
                             root.active-page == Page.cleanup ? "Preview where cleanup candidates will appear for review." :
@@ -166,6 +203,8 @@ export component AppWindow inherits Window {
                     error: root.drive-error;
                     notice: root.drive-notice;
                     scan-enabled: !root.scan-busy;
+                    last-analyzed-drive: root.last-analyzed-drive;
+                    last-drive-analysis: root.last-drive-analysis;
                     scan-drive(letter) => {
                         root.show-scan();
                         root.scan-drive(letter);
@@ -178,10 +217,54 @@ export component AppWindow inherits Window {
                     scan-root: root.scan-root;
                     error: root.scan-error;
                     cancel => { root.cancel-scan(); }
+                    view-analyzer => {
+                        root.active-page = Page.analyzer;
+                        content.content-y = 0px;
+                    }
                     view-artifacts => {
                         root.active-page = Page.artifacts;
                         content.content-y = 0px;
                     }
+                }
+                if root.active-page == Page.analyzer: AnalyzerPage {
+                    mode: root.analysis-mode;
+                    snapshot: root.analysis-snapshot;
+                    selected: root.analysis-selected;
+                    snapshots: root.analysis-snapshots;
+                    trail: root.analysis-trail;
+                    facets: root.analysis-facets;
+                    cards: root.analysis-cards;
+                    rows: root.analysis-rows;
+                    tiles: root.analysis-tiles;
+                    filter: root.analysis-filter;
+                    details: root.analysis-details;
+                    path: root.analysis-root;
+                    notice: root.analysis-notice;
+                    matches: root.analysis-matches;
+                    page-label: root.analysis-page-label;
+                    previous-page: root.analysis-previous-page;
+                    next-page: root.analysis-next-page;
+                    available: root.analysis-available;
+                    limited: root.analysis-limited;
+                    comparison: root.analysis-comparison;
+                    comparison-note: root.analysis-comparison-note;
+                    busy: root.scan-busy;
+                    side-details: root.width >= 980px;
+                    scan-phase: root.scan-phase;
+                    progress: root.scan-progress;
+                    scan-error: root.scan-error;
+                    running-path: root.scan-root;
+                    mode-changed(mode) => { root.analysis-mode-changed(mode); }
+                    snapshot-changed(snapshot) => { root.analysis-snapshot-changed(snapshot); }
+                    select(id) => { root.analysis-select(id); }
+                    breadcrumb(depth) => { root.analysis-breadcrumb(depth); }
+                    page(delta) => { root.analysis-page(delta); }
+                    apply(filter) => { root.analysis-filter-changed(filter); }
+                    resize(width, height) => { root.analysis-resize(width, height); }
+                    enter => { root.analysis-enter(); }
+                    rescan => { root.analysis-rescan(); }
+                    forget-previous => { root.analysis-forget-previous(); }
+                    cancel => { root.cancel-scan(); }
                 }
                 if root.active-page == Page.artifacts: ArtifactPage {
                     phase: root.scan-phase;

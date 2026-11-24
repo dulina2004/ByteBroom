@@ -4,6 +4,7 @@ use slint::{ComponentHandle, PlatformError, VecModel};
 
 use crate::storage::{self, Capacity, Discovery, Drive, format_bytes};
 
+mod analyzer;
 mod artifacts;
 #[cfg(windows)]
 mod development;

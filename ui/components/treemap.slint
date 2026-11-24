@@ -1,0 +1,55 @@
+import { Theme } from "../theme.slint";
+
+export struct AnalysisTile {
+    id: int, name: string, size: string, tone: int, left: float, top: float, wide: float, tall: float, label: bool,
+}
+
+export component Treemap inherits Rectangle {
+    in property <[AnalysisTile]> tiles;
+    in property <int> selected;
+    callback choose(int);
+    callback viewport(float, float);
+    height: 300px;
+    background: Theme.sidebar;
+    border-radius: 8px;
+    clip: true;
+    changed width => { root.viewport(self.width / 1px, self.height / 1px); }
+    changed height => { root.viewport(self.width / 1px, self.height / 1px); }
+    init => { root.viewport(self.width / 1px, self.height / 1px); }
+
+    for tile in root.tiles: Rectangle {
+        x: root.width * tile.left;
+        y: root.height * tile.top;
+        width: root.width * tile.wide;
+        height: root.height * tile.tall;
+        clip: true;
+        accessible-role: button;
+        accessible-label: tile.name + ", " + tile.size;
+        accessible-action-default => { root.choose(tile.id); }
+
+        Rectangle {
+            x: 1px;
+            y: 1px;
+            width: max(0px, parent.width - 2px);
+            height: max(0px, parent.height - 2px);
+            border-radius: 5px;
+            border-width: root.selected == tile.id ? 2px : 0px;
+            border-color: Theme.accent;
+            clip: true;
+            background: tile.tone == 0 ? Theme.chart-blue : tile.tone == 1 ? Theme.chart-green :
+                tile.tone == 2 ? Theme.chart-purple : tile.tone == 3 ? Theme.chart-slate :
+                tile.tone == 5 ? Theme.chart-protected : Theme.free;
+
+            if tile.label && parent.width >= 96px && parent.height >= 43px: VerticalLayout {
+                padding: 9px;
+                spacing: 3px;
+                alignment: start;
+                Text { text: tile.name; color: Theme.text; font-weight: 650; overflow: elide; min-width: 0px; }
+                Text { text: tile.size; color: Theme.text; font-size: 12px; overflow: elide; min-width: 0px; }
+            }
+        }
+        TouchArea {
+            clicked => { root.choose(tile.id); }
+        }
+    }
+}

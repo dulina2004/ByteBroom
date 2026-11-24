@@ -3,6 +3,7 @@
     windows_subsystem = "windows"
 )]
 
+mod analysis;
 mod app;
 mod detectors;
 #[cfg(windows)]

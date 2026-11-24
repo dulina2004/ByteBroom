@@ -1,0 +1,261 @@
+import { Button, ComboBox, LineEdit, ProgressIndicator } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { Glyph } from "../components/icon.slint";
+import { Panel, PanelHeading, SecondaryText, EmptyState } from "../components/panel.slint";
+import { AnalysisTile, Treemap } from "../components/treemap.slint";
+import { ScanDisplay, ScanMetric, ScanPhase } from "scan.slint";
+
+export { AnalysisTile }
+export struct AnalysisCard { label: string, value: string }
+export struct AnalysisEntry { id: int, name: string, subtitle: string, size: string }
+export struct AnalysisFilter { query: string, facet: int, minimum: int, sort: int }
+export struct AnalysisDetail { name: string, path: string, size: string, category: string, description: string, status: string, risk: string, enter: bool }
+
+component DetailPanel inherits Panel {
+    in property <AnalysisDetail> item;
+    callback enter();
+    min-height: details.min-height;
+    vertical-stretch: 0;
+    details := VerticalLayout {
+        padding: 14px;
+        spacing: 8px;
+        HorizontalLayout {
+            spacing: 10px;
+            PanelHeading { text: root.item.name; horizontal-stretch: 1; overflow: elide; min-width: 0px; vertical-alignment: center; }
+            Text { text: root.item.size; color: Theme.accent; font-weight: 650; vertical-alignment: center; }
+            if root.item.enter: Button {
+                text: "Explore folder";
+                clicked => { root.enter(); }
+            }
+        }
+        if root.item.category != "": SecondaryText { text: root.item.category + "  ·  " + root.item.status; }
+        if root.item.risk != "": SecondaryText { text: root.item.risk; color: Theme.warning; }
+        if root.item.path != "": SecondaryText { text: root.item.path; wrap: char-wrap; }
+        SecondaryText { text: root.item.description; }
+    }
+}
+
+export component AnalyzerPage inherits VerticalLayout {
+    in property <int> mode;
+    in property <int> snapshot;
+    in property <int> selected;
+    in property <[string]> snapshots;
+    in property <[string]> trail;
+    in property <[string]> facets;
+    in property <[AnalysisCard]> cards;
+    in property <[AnalysisEntry]> rows;
+    in property <[AnalysisTile]> tiles;
+    in property <AnalysisFilter> filter;
+    in property <AnalysisDetail> details;
+    in property <string> path;
+    in property <string> notice;
+    in property <string> matches;
+    in property <string> page-label;
+    in property <bool> previous-page;
+    in property <bool> next-page;
+    in property <bool> available;
+    in property <bool> limited;
+    in property <[string]> comparison;
+    in property <string> comparison-note;
+    in property <bool> busy;
+    in property <bool> side-details;
+    in property <ScanPhase> scan-phase;
+    in property <ScanDisplay> progress;
+    in property <string> running-path;
+    in property <string> scan-error;
+    callback mode-changed(int);
+    callback snapshot-changed(int);
+    callback select(int);
+    callback breadcrumb(int);
+    callback page(int);
+    callback apply(AnalysisFilter);
+    callback resize(float, float);
+    callback enter();
+    callback rescan();
+    callback cancel();
+    callback forget-previous();
+    spacing: 14px;
+    alignment: start;
+    private property <bool> running: root.scan-phase == ScanPhase.scanning || root.scan-phase == ScanPhase.cancelling;
+    private property <bool> compare-open;
+
+    HorizontalLayout {
+        spacing: 10px;
+        mode-choice := ComboBox {
+            model: ["Directories", "Developer artifacts", "Projects", "Project ecosystems", "Global resources", "Global by ecosystem", "Global by tool", "Global by drive", "Global by category", "Global by risk"];
+            current-index: root.mode;
+            accessible-label: "Analysis mode";
+            horizontal-stretch: 1;
+            selected => { root.mode-changed(self.current-index); }
+        }
+        if root.mode < 4 && root.snapshots.length > 0: ComboBox {
+            model: root.snapshots;
+            current-index: root.snapshot;
+            accessible-label: "Analysis snapshot";
+            selected => { root.snapshot-changed(self.current-index); }
+        }
+        if root.available && root.mode == 0: Button {
+            text: root.limited ? "Analyze this folder" : "Rescan this folder";
+            enabled: !root.busy;
+            clicked => { root.rescan(); }
+        }
+    }
+    if root.mode == 0 && root.snapshots.length > 1: VerticalLayout {
+        spacing: 8px;
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
+            Button { text: root.compare-open ? "Hide comparison" : "Compare latest scans"; clicked => { root.compare-open = !root.compare-open; } }
+            if root.compare-open: Button { text: "Discard previous scan"; clicked => { root.compare-open = false; root.forget-previous(); } }
+        }
+        if root.compare-open: Panel {
+            min-height: comparison-layout.min-height;
+            comparison-layout := VerticalLayout {
+                padding: 14px;
+                spacing: 7px;
+                for line in root.comparison: SecondaryText { text: line; }
+                if root.comparison-note != "": SecondaryText { text: root.comparison-note; color: Theme.warning; }
+            }
+        }
+    }
+    if root.running: Panel {
+        min-height: 112px;
+        VerticalLayout {
+            padding: 14px;
+            spacing: 6px;
+            HorizontalLayout {
+                PanelHeading { text: root.scan-phase == ScanPhase.cancelling ? "Cancelling scan…" : "Analyzing folder…"; horizontal-stretch: 1; }
+                Button { text: "Cancel analysis"; enabled: root.scan-phase == ScanPhase.scanning; clicked => { root.cancel(); } }
+            }
+            SecondaryText { text: root.running-path; overflow: elide; min-width: 0px; }
+            SecondaryText { text: root.progress.files + " files · " + root.progress.directories + " directories · " + root.progress.logical-size + " · " + root.progress.elapsed; }
+            ProgressIndicator { indeterminate: true; }
+        }
+    }
+    if root.scan-phase == ScanPhase.failed && root.scan-error != "": SecondaryText { text: root.scan-error; color: Theme.warning; }
+    if !root.available: EmptyState {
+        glyph: Glyph.scan;
+        title: root.mode >= 4 ? "Discover development storage" : "Analyze a drive or folder";
+        detail: root.mode >= 4 ? "Use Dev Storage to discover and measure locations for this view." :
+            "Start from a drive card or choose Scan a folder to build a storage map.";
+    }
+    if root.available: VerticalLayout {
+        spacing: 12px;
+        if root.trail.length > 0: HorizontalLayout {
+            spacing: 6px;
+            for crumb[index] in root.trail: Button {
+                text: crumb;
+                max-width: 138px;
+                accessible-label: "Open breadcrumb " + crumb;
+                enabled: index < root.trail.length - 1;
+                clicked => { root.breadcrumb(index); }
+            }
+        }
+        if root.path != "": SecondaryText { text: root.path; wrap: char-wrap; }
+        HorizontalLayout {
+            spacing: 10px;
+            for card in root.cards: ScanMetric { label: card.label; value: card.value; }
+        }
+        if root.notice != "": SecondaryText { text: root.notice; color: Theme.warning; }
+        if !root.limited: result-controls := VerticalLayout {
+            spacing: 9px;
+            function update() {
+                root.apply({query: search.text, facet: category.current-index, minimum: threshold.current-index, sort: order.current-index});
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                search := LineEdit {
+                    text: root.filter.query;
+                    placeholder-text: "Search names, paths, projects, or tools";
+                    accessible-label: "Search storage analysis";
+                    horizontal-stretch: 1;
+                    edited => { result-controls.update(); }
+                }
+                order := ComboBox {
+                    model: ["Largest first", "Smallest first", "Name"];
+                    current-index: root.filter.sort;
+                    accessible-label: "Analysis sort order";
+                    selected => { result-controls.update(); }
+                }
+                Button { text: "Clear filters"; clicked => { root.apply({query: "", facet: 0, minimum: 0, sort: root.filter.sort}); } }
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                category := ComboBox {
+                    model: root.facets;
+                    current-index: root.filter.facet;
+                    accessible-label: "Analysis category or status";
+                    horizontal-stretch: 1;
+                    selected => { result-controls.update(); }
+                }
+                threshold := ComboBox {
+                    model: ["Any size", "100 MiB and up", "500 MiB and up", "1 GiB and up", "5 GiB and up"];
+                    current-index: root.filter.minimum;
+                    accessible-label: "Minimum logical size";
+                    selected => { result-controls.update(); }
+                }
+            }
+            SecondaryText { text: root.matches; }
+            if root.tiles.length > 0: HorizontalLayout {
+                spacing: 12px;
+                Treemap {
+                    height: 242px;
+                    horizontal-stretch: 1;
+                    tiles: root.tiles;
+                    selected: root.selected;
+                    choose(id) => { root.select(id); }
+                    viewport(width, height) => { root.resize(width, height); }
+                }
+                if root.side-details: VerticalLayout {
+                    width: 234px;
+                    alignment: start;
+                    if root.details.name != "": DetailPanel {
+                        item: root.details;
+                        enter => { root.enter(); }
+                    }
+                    if root.details.name == "": Panel {
+                        height: 104px;
+                        VerticalLayout {
+                            padding: 14px;
+                            spacing: 7px;
+                            alignment: start;
+                            PanelHeading { text: "Item details"; }
+                            SecondaryText { text: "Select a tile or a row to inspect it."; }
+                        }
+                    }
+                }
+            }
+            if root.details.name != "" && (!root.side-details || root.tiles.length == 0): DetailPanel {
+                item: root.details;
+                enter => { root.enter(); }
+            }
+            if root.rows.length == 0: EmptyState {
+                glyph: Glyph.scan;
+                title: root.filter.query != "" || root.filter.facet > 0 || root.filter.minimum > 0 ? "No matching results" : "No items in this view";
+                detail: "Use the current scan scope and filters to choose which items are shown.";
+            }
+            if root.rows.length > 0: HorizontalLayout {
+                spacing: 8px;
+                PanelHeading { text: "Measured items"; horizontal-stretch: 1; vertical-alignment: center; }
+                SecondaryText { text: root.page-label; vertical-alignment: center; }
+                Button { text: "Previous"; enabled: root.previous-page; clicked => { root.page(-1); } }
+                Button { text: "Next"; enabled: root.next-page; clicked => { root.page(1); } }
+            }
+            for row in root.rows: HorizontalLayout {
+                spacing: 10px;
+                Button {
+                    text: row.name;
+                    accessible-label: "Inspect " + row.name;
+                    checked: row.id == root.selected;
+                    horizontal-stretch: 1;
+                    min-width: 80px;
+                    max-width: 230px;
+                    clicked => { root.select(row.id); }
+                }
+                Text { text: row.subtitle; color: Theme.secondary; overflow: elide; min-width: 0px; horizontal-stretch: 2; vertical-alignment: center; }
+                Text { text: row.size; color: Theme.text; vertical-alignment: center; }
+            }
+        }
+        SecondaryText { text: "Rectangle area shows logical size for the matching measured items. Windows capacity is reported separately."; }
+    }
+}

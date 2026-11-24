@@ -52,9 +52,10 @@ component DriveValue inherits VerticalLayout {
 component DriveCard inherits Panel {
     in property <DriveCardData> drive;
     in property <bool> scan-enabled;
+    in property <string> analysis-status;
     callback scan();
     min-width: 265px;
-    height: 203px;
+    height: 224px;
     horizontal-stretch: 1;
     private property <color> usage-ink: root.drive.used-ratio >= 0.9 ? Theme.warning : Theme.used;
 
@@ -127,8 +128,16 @@ component DriveCard inherits Panel {
         }
         HorizontalLayout {
             alignment: end;
+            spacing: 8px;
+            SecondaryText {
+                text: root.analysis-status != "" ? root.analysis-status :
+                    root.drive.used-ratio >= 0.97 ? "Very low available space" :
+                    root.drive.used-ratio >= 0.9 ? "Low available space" : "";
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+            }
             Button {
-                text: "Scan";
+                text: "Analyze";
                 accessible-label: "Scan drive " + root.drive.letter;
                 enabled: root.scan-enabled;
                 height: 30px;
@@ -148,6 +157,8 @@ export component DashboardPage inherits VerticalLayout {
     in property <string> error;
     in property <string> notice;
     in property <bool> scan-enabled;
+    in property <string> last-analyzed-drive;
+    in property <string> last-drive-analysis;
     callback scan-drive(string);
     private property <bool> has-drives: root.drives.length > 0;
     spacing: 20px;
@@ -178,6 +189,7 @@ export component DashboardPage inherits VerticalLayout {
             for drive in root.drives: DriveCard {
                 drive: drive;
                 scan-enabled: root.scan-enabled;
+                analysis-status: drive.letter == root.last-analyzed-drive ? root.last-drive-analysis : "";
                 scan => { root.scan-drive(drive.letter); }
             }
         }
