@@ -14,6 +14,8 @@ ByteBroom is a single Cargo package, `bytebroom`. It uses Slint at runtime, `sli
 | `src/global_caches/`                           | Resolves known developer storage, validates local paths, and schedules selected measurement roots.   |
 | `src/analysis/`                                | Builds disjoint analysis views, bounded hierarchy snapshots, comparisons, and treemap geometry.      |
 | `src/app/analyzer.rs`                           | Maps analysis snapshots to paginated Slint models and coalesces search and resize events.             |
+| `src/cleanup/`                                 | Derives eligible candidates, enforces exclusions, and produces immutable read-only plans.            |
+| `src/app/cleanup.rs`                            | Presents the Cleanup selection, validation progress, and preview in Slint.                           |
 | `src/app/development.rs`                       | Presents the inventory, selection, filters, and paginated results in Slint.                          |
 | `src/app/scan.rs` and `src/app/folder_picker.rs` | Coordinate one scan or folder picker at a time and present the results in Slint.                      |
 | `build.rs`                                      | Compiles `ui/app-window.slint` with Slint's dark Fluent style for standard widgets.                  |
@@ -65,3 +67,11 @@ The scan worker builds project, artifact, and ecosystem projections from the det
 The UI retains two project scan snapshots and the current global analysis. It browses up to 512 rows per view, renders twelve rows per page, and debounces search and resize. Rust computes the treemap by deterministic balanced binary splits along the longest axis. At most 80 tiles reach Slint. Smaller positive-size rows are grouped for chart display, and zero or unknown sizes stay in the list. Geometry uses viewport-relative coordinates and is recalculated after a resize settles.
 
 Comparison checks the verified volume, directory ID, and normalized root path. Only complete scans are eligible. Root totals cover all measured data. If either snapshot omits children, per-directory comparison uses the intersection of both retained lists. Scan snapshots remain in memory, and local export is planned.
+
+## Cleanup planning
+
+The existing scanner records a bounded set of project and relevant target identities while it still holds directory handles. Cleanup derives a separate, bounded candidate registry from the latest scan. Slint passes candidate IDs. Rust retains paths, ownership, measurements, and evidence and remains responsible for eligibility.
+
+A preview request snapshots the selection, exclusions, scope, and session, scan, and revision identifiers. A worker uses read-only handle-relative directory enumeration to verify the scope, project marker, target identity, protected-content policy, and measured counts. Canonical component ancestry and filesystem IDs reject overlapping operations. Slint polls a single progress snapshot through the shared scan controller, which runs one preview, scan, or folder picker at a time. User cancellation preserves already validated results and stops further checking.
+
+The preview is immutable after publication. Changing selections or exclusions, closing the preview, or starting a newer scan invalidates it. A recording backend compiled only into tests exercises single-use authorization, method binding, revalidation, and cancellation. Production provides preview only. Execution results, space recovery, and cleanup history depend on a reviewed removal backend. [Cleanup safety](cleanup-safety.md)

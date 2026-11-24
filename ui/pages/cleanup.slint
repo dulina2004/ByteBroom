@@ -1,12 +1,189 @@
+import { Button, CheckBox, ComboBox, LineEdit, ProgressIndicator } from "std-widgets.slint";
 import { Glyph } from "../components/icon.slint";
-import { EmptyState } from "../components/panel.slint";
+import { EmptyState, Panel, PanelHeading, SecondaryText } from "../components/panel.slint";
+import { Theme } from "../theme.slint";
+import { ScanMetric } from "scan.slint";
+
+export struct CleanupSummary { selected: string, size: string, eligible: string, review: string, unavailable: string }
+export struct CleanupItem {
+    source: string, id: int, name: string, path: string, owner: string, category: string, size: string,
+    evidence: string, description: string, regeneration: string, warning: string, state: string,
+    selectable: bool, selected: bool, excluded: bool, open: bool,
+}
+
+component CandidateDetails inherits VerticalLayout {
+    in property <CleanupItem> item;
+    spacing: 6px;
+    SecondaryText { text: root.item.path; wrap: char-wrap; }
+    SecondaryText { text: "Project  " + root.item.owner; wrap: char-wrap; }
+    SecondaryText { text: "Evidence  " + root.item.evidence; }
+    SecondaryText { text: root.item.description; }
+    SecondaryText { text: root.item.regeneration; }
+    if root.item.warning != "": SecondaryText { text: root.item.warning; color: Theme.warning; }
+}
 
 export component CleanupPage inherits VerticalLayout {
+    in property <[CleanupItem]> rows;
+    in property <[CleanupItem]> plan-rows;
+    in property <CleanupItem> detail;
+    in property <CleanupSummary> summary;
+    in property <bool> inventory-ready;
+    in property <bool> can-preview;
+    in property <bool> busy;
+    in property <bool> cancelling;
+    in property <bool> scan-busy;
+    in property <bool> preview-ready;
+    in property <bool> previous;
+    in property <bool> next;
+    in property <string> page-label;
+    in property <string> matches;
+    in property <string> coverage;
+    in property <string> notice;
+    in property <string> progress;
+    in property <string> plan-title;
+    in property <string> plan-summary;
+    in property <string> query;
+    in property <int> facet-index;
+    callback filter(string, int);
+    callback page(int);
+    callback select(string, int, bool);
+    callback inspect(int);
+    callback exclude(string, int);
+    callback clear();
+    callback select-page();
+    callback preview();
+    callback cancel();
+    callback close-preview();
     alignment: start;
+    spacing: 16px;
 
-    EmptyState {
+    SecondaryText { text: "Cleanup currently supports read-only previews. Recycle Bin and permanent removal are unavailable."; }
+
+    if !root.inventory-ready: EmptyState {
         glyph: Glyph.cleanup;
         title: "No cleanup candidates";
-        detail: "Once scanning is available, review candidate files and their sizes here.";
+        detail: "Scan a development folder to review its detected artifacts here. Global developer resources are analysis-only.";
+    }
+
+    if root.inventory-ready: HorizontalLayout {
+        spacing: 9px;
+        ScanMetric { label: "Selected"; value: root.summary.selected; }
+        ScanMetric { label: "Selected logical size"; value: root.summary.size; }
+        ScanMetric { label: "Preview candidates"; value: root.summary.eligible; }
+        ScanMetric { label: "Unavailable"; value: root.summary.unavailable; }
+    }
+    if root.inventory-ready: HorizontalLayout {
+        spacing: 8px;
+        SecondaryText { text: root.summary.review + " selected for individual review"; horizontal-stretch: 1; vertical-alignment: center; }
+        Button { text: "Clear selection"; enabled: !root.scan-busy && root.can-preview; clicked => { root.clear(); } }
+        if !root.busy: Button {
+            text: "Preview cleanup";
+            enabled: !root.scan-busy && root.can-preview;
+            clicked => { root.preview(); }
+        }
+        if root.busy: Button {
+            text: "Cancel preview";
+            enabled: !root.cancelling;
+            clicked => { root.cancel(); }
+        }
+    }
+    if root.coverage != "": SecondaryText { text: root.coverage; }
+    if root.notice != "": SecondaryText { text: root.notice; color: Theme.warning; }
+    if root.busy: Panel {
+        min-height: work.min-height;
+        work := VerticalLayout {
+            padding: 14px;
+            spacing: 7px;
+            PanelHeading { text: "Validating selected folders"; }
+            SecondaryText { text: root.progress; }
+            ProgressIndicator { indeterminate: true; }
+        }
+    }
+    if root.preview-ready: Panel {
+        min-height: preview-layout.min-height;
+        preview-layout := VerticalLayout {
+            padding: 16px;
+            spacing: 12px;
+            HorizontalLayout {
+                PanelHeading { text: root.plan-title; horizontal-stretch: 1; vertical-alignment: center; }
+                Button { text: "Close preview"; enabled: !root.scan-busy; clicked => { root.close-preview(); } }
+            }
+            SecondaryText { text: root.plan-summary; }
+            SecondaryText { text: "Method: metadata inspection only. Logical sizes describe file lengths. Directory contents can change after validation."; }
+            for item in root.plan-rows: VerticalLayout {
+                spacing: 5px;
+                Rectangle { height: 1px; background: Theme.stroke; }
+                Text { text: item.name + "  ·  " + item.size; color: Theme.text; font-weight: 650; }
+                SecondaryText { text: item.category + "  ·  " + item.state; }
+                CandidateDetails { item: item; }
+            }
+        }
+    }
+
+    if root.inventory-ready: VerticalLayout {
+        spacing: 8px;
+        HorizontalLayout {
+            spacing: 8px;
+            search := LineEdit {
+                text: root.query;
+                placeholder-text: "Find paths, projects, ecosystems, or categories";
+                accessible-label: "Find cleanup candidates";
+                horizontal-stretch: 1;
+                edited => { root.filter(self.text, facet.current-index); }
+            }
+            facet := ComboBox {
+                current-index: root.facet-index;
+                model: ["All candidates", "Eligible for bulk review", "Individual review", "Unavailable", "Selected", "Excluded"];
+                accessible-label: "Cleanup eligibility filter";
+                selected => { root.filter(search.text, self.current-index); }
+            }
+        }
+        if root.detail.open: Panel {
+            min-height: detail-layout.min-height;
+            detail-layout := VerticalLayout {
+                padding: 14px;
+                spacing: 8px;
+                HorizontalLayout {
+                    PanelHeading { text: root.detail.name; horizontal-stretch: 1; vertical-alignment: center; }
+                    if root.detail.selectable: Button {
+                        text: root.detail.excluded ? "Restore to candidates" : "Exclude for this session";
+                        enabled: !root.scan-busy;
+                        clicked => { root.exclude(root.detail.source, root.detail.id); }
+                    }
+                    Button { text: "Hide details"; clicked => { root.inspect(-1); } }
+                }
+                SecondaryText { text: root.detail.category + "  ·  " + root.detail.state; }
+                CandidateDetails { item: root.detail; }
+            }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            SecondaryText { text: root.matches; horizontal-stretch: 1; vertical-alignment: center; }
+            Button { text: "Select eligible on page"; enabled: !root.scan-busy && root.rows.length > 0; clicked => { root.select-page(); } }
+            SecondaryText { text: root.page-label; vertical-alignment: center; }
+            Button { text: "Previous"; enabled: root.previous; clicked => { root.page(-1); } }
+            Button { text: "Next"; enabled: root.next; clicked => { root.page(1); } }
+        }
+        if root.rows.length == 0: SecondaryText { text: "No candidates match these filters."; }
+        for row in root.rows: VerticalLayout {
+            spacing: 5px;
+            Rectangle { height: 1px; background: Theme.stroke; }
+            HorizontalLayout {
+                spacing: 8px;
+                CheckBox {
+                    checked: row.selected;
+                    accessible-label: "Select " + row.name + " at " + row.path;
+                    enabled: !root.scan-busy && row.selectable && !row.excluded;
+                    toggled => { root.select(row.source, row.id, self.checked); }
+                }
+                Text {
+                    text: row.name + "  ·  " + row.path;
+                    color: Theme.text; min-width: 0px; overflow: elide; horizontal-stretch: 1; vertical-alignment: center;
+                }
+                Text { text: row.size; color: Theme.text; vertical-alignment: center; }
+                Button { text: "Details"; accessible-label: "Cleanup details for " + row.name; clicked => { root.inspect(row.id); } }
+            }
+            SecondaryText { text: row.category + "  ·  " + row.state; }
+        }
     }
 }

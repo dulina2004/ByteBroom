@@ -25,7 +25,8 @@ use windows_sys::{
             UNICODE_STRING,
         },
         Storage::FileSystem::{
-            CreateFileW, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
+            CreateFileW, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_OFFLINE,
+            FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS, FILE_ATTRIBUTE_REPARSE_POINT,
             FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
             FILE_ID_INFO, FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE,
             FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TRAVERSE, FileAttributeTagInfo, FileIdInfo,
@@ -42,9 +43,11 @@ use crate::detectors::Facts;
 const DIRECTORY_BUFFER_WORDS: usize = 1024;
 const SHARE_MODE: u32 = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
 const NAME_OFFSET: usize = offset_of!(FILE_FULL_DIR_INFORMATION, FileName);
+const OFFLINE: u32 = FILE_ATTRIBUTE_OFFLINE | FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS;
 
 pub(crate) enum Entry {
     File(u64, Facts, bool),
+    NamedFile(Vec<u16>, u64),
     Directory(Vec<u16>),
     Link,
     Invalid,
@@ -52,6 +55,7 @@ pub(crate) enum Entry {
 
 pub(crate) struct Directory {
     handle: OwnedHandle,
+    attributes: u32,
     buffer: Option<Box<[u64; DIRECTORY_BUFFER_WORDS]>>,
     offset: usize,
     end: usize,
@@ -59,6 +63,21 @@ pub(crate) struct Directory {
 
 impl Directory {
     pub(crate) fn open_root(path: &Path, cancellation: &Cancellation) -> io::Result<Option<Self>> {
+        Self::open_root_with(path, cancellation, false)
+    }
+
+    pub(crate) fn open_inspection(
+        path: &Path,
+        cancellation: &Cancellation,
+    ) -> io::Result<Option<Self>> {
+        Self::open_root_with(path, cancellation, true)
+    }
+
+    fn open_root_with(
+        path: &Path,
+        cancellation: &Cancellation,
+        inspect: bool,
+    ) -> io::Result<Option<Self>> {
         let mut components = path.components();
         let Some(Component::Prefix(prefix)) = components.next() else {
             return Err(invalid_root());
@@ -99,6 +118,9 @@ impl Directory {
         // SAFETY: CreateFileW returned a valid handle that we own.
         let handle = unsafe { OwnedHandle::from_raw_handle(handle) };
         let mut directory = Self::validated(handle)?.ok_or_else(link_root)?;
+        if inspect && !directory.inspectable() {
+            return Err(link_root());
+        }
         while let Some(component) = components.next() {
             if cancellation.is_cancelled() {
                 return Ok(None);
@@ -109,11 +131,18 @@ impl Directory {
             directory = directory
                 .open_child(&wide_component(name)?, components.peek().is_none())?
                 .ok_or_else(link_root)?;
+            if inspect && !directory.inspectable() {
+                return Err(link_root());
+            }
         }
         Ok(Some(directory))
     }
 
-    pub(super) fn open_child(&self, name: &[u16], enumerate: bool) -> io::Result<Option<Self>> {
+    pub(crate) fn inspectable(&self) -> bool {
+        self.attributes & OFFLINE == 0
+    }
+
+    pub(crate) fn open_child(&self, name: &[u16], enumerate: bool) -> io::Result<Option<Self>> {
         // A single literal component cannot escape through separators, a stream or '..'.
         if !valid_component(name) {
             return Err(invalid_root());
@@ -182,6 +211,7 @@ impl Directory {
         }
         Ok(Some(Self {
             handle,
+            attributes: info.FileAttributes,
             buffer: None,
             offset: 0,
             end: 0,
@@ -193,6 +223,19 @@ impl Directory {
         collect_evidence: bool,
         recognize_disk: bool,
     ) -> io::Result<Option<Entry>> {
+        self.next_with(collect_evidence, recognize_disk, false)
+    }
+
+    pub(crate) fn next_inspection(&mut self) -> io::Result<Option<Entry>> {
+        self.next_with(false, false, true)
+    }
+
+    fn next_with(
+        &mut self,
+        collect_evidence: bool,
+        recognize_disk: bool,
+        names: bool,
+    ) -> io::Result<Option<Entry>> {
         loop {
             if self.offset == self.end && !self.refill()? {
                 return Ok(None);
@@ -202,8 +245,12 @@ impl Directory {
             // to the number of bytes written within this allocation.
             let data =
                 unsafe { std::slice::from_raw_parts(buffer.as_ptr().cast::<u8>(), self.end) };
-            let (advance, entry) =
-                parse_record(&data[self.offset..], collect_evidence, recognize_disk)?;
+            let (advance, entry) = parse_record(
+                &data[self.offset..],
+                collect_evidence,
+                recognize_disk,
+                names,
+            )?;
             self.offset = if advance == 0 {
                 self.end
             } else {
@@ -304,6 +351,7 @@ fn parse_record(
     data: &[u8],
     collect_evidence: bool,
     recognize_disk: bool,
+    names: bool,
 ) -> io::Result<(usize, Option<Entry>)> {
     let header = data.get(..NAME_OFFSET).ok_or_else(invalid_record)?;
     // The fixed-size fields below all precede FileName in FILE_FULL_DIR_INFORMATION.
@@ -324,21 +372,25 @@ fn parse_record(
         return Ok((next, None));
     }
     let flags = read(offset_of!(FILE_FULL_DIR_INFORMATION, FileAttributes));
-    let entry = if flags & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+    let wide = || {
+        name.as_chunks::<2>()
+            .0
+            .iter()
+            .copied()
+            .map(u16::from_le_bytes)
+            .collect()
+    };
+    let entry = if flags & FILE_ATTRIBUTE_REPARSE_POINT != 0 || names && flags & OFFLINE != 0 {
         Entry::Link
     } else if flags & FILE_ATTRIBUTE_DIRECTORY != 0 {
-        Entry::Directory(
-            name.as_chunks::<2>()
-                .0
-                .iter()
-                .copied()
-                .map(u16::from_le_bytes)
-                .collect(),
-        )
+        Entry::Directory(wide())
     } else {
         let offset = offset_of!(FILE_FULL_DIR_INFORMATION, EndOfFile);
         let length = i64::from_le_bytes(header[offset..offset + 8].try_into().unwrap());
         u64::try_from(length).map_or(Entry::Invalid, |bytes| {
+            if names {
+                return Entry::NamedFile(wide(), bytes);
+            }
             let facts = if collect_evidence {
                 Facts::from_windows_file(name)
             } else {

@@ -5,6 +5,7 @@
 
 mod analysis;
 mod app;
+mod cleanup;
 mod detectors;
 #[cfg(windows)]
 mod global_caches;

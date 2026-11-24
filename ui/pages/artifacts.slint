@@ -57,6 +57,7 @@ component ArtifactItem inherits Panel {
     in property <ArtifactDetails> details;
     in property <bool> grouped;
     callback select(int);
+    callback review(int);
     private property <bool> expanded: !root.grouped && root.details.open && root.details.index == root.entry.index;
     min-height: item-layout.min-height;
     vertical-stretch: 0;
@@ -117,11 +118,17 @@ component ArtifactItem inherits Panel {
             DetailLine { label: "Contents"; value: root.details.description; }
             DetailLine { label: "Regeneration"; value: root.details.regeneration; }
             SecondaryText { text: root.details.warning; color: Theme.warning; font-size: 13px; }
+            Button {
+                text: "Review in Cleanup";
+                accessible-label: "Review " + root.entry.name + " in Cleanup";
+                clicked => { root.review(root.entry.index); }
+            }
         }
     }
 }
 
 export component ArtifactPage inherits VerticalLayout {
+    callback review(int);
     in property <ScanPhase> phase;
     in property <ScanDisplay> progress;
     in property <ArtifactSummary> summary;
@@ -267,6 +274,7 @@ export component ArtifactPage inherits VerticalLayout {
         for row in root.rows: ArtifactItem {
             entry: row; grouped: root.filters.grouped; details: root.details;
             select(index) => { root.select(index); }
+            review(index) => { root.review(index); }
         }
         SecondaryText { text: "Sizes are logical file lengths. Allocated and reclaimable disk space can differ."; }
     }

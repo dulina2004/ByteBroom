@@ -28,10 +28,14 @@
 - Implemented bounded directory exploration, native treemaps, filtered analysis views, and comparisons for two compatible in-memory directory scans.
 - Added project, artifact, ecosystem, and global resource views. File Explorer integration, report export, and more advanced filters are deferred. [Analyzer guide](storage-analyzer.md)
 
+## Cleanup planning
+
+- Implemented explicit candidate selection, session exclusions, bounded Windows identity checks, and a cancellable read-only dry run.
+- Verified single-use authorization and revalidation with a test-only recording backend. Recycle Bin, permanent removal, recovery reporting, and cleanup history remain deferred pending an execution safety review. [Cleanup safety](cleanup-safety.md)
+
 ## Later milestones
 
 - Evaluate additional detector rules against representative fixtures and measure artifact detection overhead on large trees.
 - Design protected, host-only Docker and WSL storage reporting.
 - Evaluate allocated-size reporting and combined project/global accounting. Benchmark low-memory and cancellation behavior with synthetic large caches.
-- Feature 06 will focus on safe cleanup planning and execution, with explicit review, exclusions, confirmation, and recoverable removal options.
 - Validate the Windows build on a clean machine and settle licensing before distributing it. Add packaging and signing, then validate the core and GUI on Linux and macOS.

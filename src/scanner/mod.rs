@@ -63,8 +63,10 @@ pub(crate) enum ScanOutcome {
     Failed(io::Error),
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ScopeIdentity(pub(crate) u64, pub(crate) [u8; 16], pub(crate) PathBuf);
+
+pub(crate) type RecordedIdentities = std::collections::HashMap<PathBuf, ScopeIdentity>;
 
 #[derive(Debug)]
 pub(crate) struct ScanResult {
@@ -73,6 +75,7 @@ pub(crate) struct ScanResult {
     pub(crate) top_directories: Vec<DirectorySize>,
     pub(crate) hierarchy: Option<Folder>,
     pub(crate) identity: Option<ScopeIdentity>,
+    pub(crate) cleanup_identities: RecordedIdentities,
     pub(crate) outcome: ScanOutcome,
     pub(crate) developer: Results,
 }
@@ -95,6 +98,7 @@ fn scan_with_interval(
         progress: ScanProgress::default(),
         hierarchy: None,
         identity: None,
+        cleanup_identities: RecordedIdentities::new(),
         #[cfg(windows)]
         developer: Some(Collector::default()),
         #[cfg(windows)]
@@ -141,6 +145,7 @@ fn scan_with_interval(
         top_directories,
         hierarchy: scan.hierarchy,
         identity: scan.identity,
+        cleanup_identities: scan.cleanup_identities,
         outcome,
         developer,
     }
@@ -150,6 +155,7 @@ struct Traversal {
     progress: ScanProgress,
     hierarchy: Option<Folder>,
     identity: Option<ScopeIdentity>,
+    cleanup_identities: RecordedIdentities,
     #[cfg(windows)]
     developer: Option<Collector>,
     #[cfg(windows)]
@@ -234,6 +240,7 @@ fn walk(
                 }
             }
             Ok(Some(Entry::Link)) => scan.progress.skipped_links += 1,
+            Ok(Some(Entry::NamedFile(..))) => unreachable!("scan enumeration omits file names"),
             Ok(Some(Entry::Invalid)) => {
                 scan.progress.inaccessible += 1;
                 directory.measurement.inaccessible += 1;
@@ -352,6 +359,15 @@ fn finish_frame(
             measured,
             finished,
         );
+        if finished
+            && (findings.project || findings.candidate && crate::cleanup::tracked(path))
+            && scan.cleanup_identities.len() < crate::cleanup::IDENTITY_LIMIT
+            && let Ok((volume, file, canonical)) = frame.directory.identity()
+            && file != [0; 16]
+        {
+            scan.cleanup_identities
+                .insert(path.to_owned(), ScopeIdentity(volume, file, canonical));
+        }
         scan.progress.projects += usize::from(findings.project);
         scan.progress.artifact_candidates += usize::from(findings.candidate);
     }
@@ -468,6 +484,7 @@ pub(crate) fn measure(
         progress: ScanProgress::default(),
         hierarchy: None,
         identity: None,
+        cleanup_identities: RecordedIdentities::new(),
         developer: None,
         avd: avd.then(AvdSizes::default),
         started: Instant::now(),

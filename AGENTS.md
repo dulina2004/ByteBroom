@@ -18,6 +18,8 @@ Keep filesystem work off the UI thread. Process large trees incrementally with b
 
 Keep scanning read-only. Treat input paths as untrusted. Skip symlinks and Windows junctions by default, and surface permission failures gracefully. Folder names alone never establish deletion safety. Never automatically request administrator privileges. Obtain explicit approval for destructive operations and before adding destructive behavior. Use generated fixtures in temporary test directories for filesystem tests and never delete actual user files.
 
+Cleanup previews and analysis must remain read-only. Keep any future removal calls inside an approved cleanup execution backend. Require explicit, single-use approval of the exact validated plan. Feature 06 currently ships preview only.
+
 ## Verification and Reviews
 
 Inspect the tree before editing. For substantial work, outline a short plan, implement incrementally, and keep changes focused. Identify risks before changing filesystem code. Explain architectural decisions and update docs with the implementation.

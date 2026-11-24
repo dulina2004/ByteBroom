@@ -4,7 +4,7 @@ import { Page, Sidebar } from "components/sidebar.slint";
 import { SecondaryText } from "components/panel.slint";
 import { DashboardPage, DriveCardData } from "pages/dashboard.slint";
 import { DirectoryDisplay, ScanDisplay, ScanPage, ScanPhase } from "pages/scan.slint";
-import { CleanupPage } from "pages/cleanup.slint";
+import { CleanupItem, CleanupPage, CleanupSummary } from "pages/cleanup.slint";
 import { SettingsPage } from "pages/settings.slint";
 import { ArtifactDetails, ArtifactFilter, ArtifactPage, ArtifactRow, ArtifactSummary } from "pages/artifacts.slint";
 import { AnalysisCard, AnalysisDetail, AnalysisEntry, AnalysisFilter, AnalysisTile, AnalyzerPage } from "pages/analyzer.slint";
@@ -14,8 +14,39 @@ export { DirectoryDisplay, DriveCardData, ScanDisplay, ScanPhase }
 export { ArtifactDetails, ArtifactFilter, ArtifactRow, ArtifactSummary }
 export { AnalysisCard, AnalysisDetail, AnalysisEntry, AnalysisFilter, AnalysisTile }
 export { StorageDetails, StorageFilter, StorageGroup, StoragePhase, StorageRow, StorageSummary }
+export { CleanupItem, CleanupSummary }
 
 export component AppWindow inherits Window {
+    in property <[CleanupItem]> cleanup-rows;
+    in property <[CleanupItem]> cleanup-plan-rows;
+    in property <CleanupItem> cleanup-detail;
+    in property <CleanupSummary> cleanup-summary;
+    in property <bool> cleanup-inventory-ready;
+    in property <bool> cleanup-can-preview;
+    in property <bool> cleanup-busy;
+    in property <bool> cleanup-cancelling;
+    in property <bool> cleanup-preview-ready;
+    in property <bool> cleanup-previous;
+    in property <bool> cleanup-next;
+    in property <string> cleanup-page-label;
+    in property <string> cleanup-matches;
+    in property <string> cleanup-coverage;
+    in property <string> cleanup-notice;
+    in property <string> cleanup-progress;
+    in property <string> cleanup-plan-title;
+    in property <string> cleanup-plan-summary;
+    in property <string> cleanup-query;
+    in property <int> cleanup-facet-index;
+    callback cleanup-filter(string, int);
+    callback cleanup-page(int);
+    callback cleanup-select(string, int, bool);
+    callback cleanup-inspect(int);
+    callback cleanup-exclude(string, int);
+    callback cleanup-clear();
+    callback cleanup-select-page();
+    callback cleanup-preview();
+    callback cleanup-cancel();
+    callback cleanup-close-preview();
     in property <int> analysis-mode;
     in property <int> analysis-snapshot;
     in property <int> analysis-selected: -1;
@@ -112,7 +143,7 @@ export component AppWindow inherits Window {
     callback cache-inspect(int);
     private property <Page> active-page: Page.dashboard;
     private property <bool> scan-busy:
-        root.picking-scan-folder || root.scan-phase == ScanPhase.scanning || root.scan-phase == ScanPhase.cancelling
+        root.cleanup-busy || root.picking-scan-folder || root.scan-phase == ScanPhase.scanning || root.scan-phase == ScanPhase.cancelling
         || root.cache-phase == StoragePhase.discovering || root.cache-phase == StoragePhase.measuring || root.cache-phase == StoragePhase.cancelling;
 
     function show-scan() {
@@ -189,7 +220,7 @@ export component AppWindow inherits Window {
                             root.active-page == Page.analyzer ? "Explore where measured storage is concentrated." :
                             root.active-page == Page.artifacts ? "Explore detected dependencies, caches, and build output." :
                             root.active-page == Page.development ? "Discover and measure shared caches, installed tools, and local environment data." :
-                            root.active-page == Page.cleanup ? "Preview where cleanup candidates will appear for review." :
+                            root.active-page == Page.cleanup ? "Review developer artifacts and validate a proposed plan." :
                             "View the default appearance and application version.";
                     }
                 }
@@ -285,6 +316,11 @@ export component AppWindow inherits Window {
                     filter(new-filters) => { root.filter-artifacts(new-filters); }
                     turn-page(delta) => { root.artifact-turn-page(delta); }
                     select(index) => { root.artifact-select(index); }
+                    review(index) => {
+                        root.cleanup-inspect(index);
+                        root.active-page = Page.cleanup;
+                        content.content-y = 0px;
+                    }
                     clear-project => { root.artifact-clear-project(); }
                 }
                 if root.active-page == Page.development: DevelopmentPage {
@@ -316,7 +352,39 @@ export component AppWindow inherits Window {
                     select-filtered(checked) => { root.cache-select-filtered(checked); }
                     inspect(index) => { root.cache-inspect(index); }
                 }
-                if root.active-page == Page.cleanup: CleanupPage { }
+                if root.active-page == Page.cleanup: CleanupPage {
+                    rows: root.cleanup-rows;
+                    plan-rows: root.cleanup-plan-rows;
+                    detail: root.cleanup-detail;
+                    summary: root.cleanup-summary;
+                    inventory-ready: root.cleanup-inventory-ready;
+                    can-preview: root.cleanup-can-preview;
+                    busy: root.cleanup-busy;
+                    cancelling: root.cleanup-cancelling;
+                    preview-ready: root.cleanup-preview-ready;
+                    previous: root.cleanup-previous;
+                    next: root.cleanup-next;
+                    page-label: root.cleanup-page-label;
+                    matches: root.cleanup-matches;
+                    coverage: root.cleanup-coverage;
+                    notice: root.cleanup-notice;
+                    progress: root.cleanup-progress;
+                    plan-title: root.cleanup-plan-title;
+                    plan-summary: root.cleanup-plan-summary;
+                    query: root.cleanup-query;
+                    facet-index: root.cleanup-facet-index;
+                    scan-busy: root.scan-busy;
+                    filter(query, facet) => { root.cleanup-filter(query, facet); }
+                    page(offset) => { root.cleanup-page(offset); }
+                    select(source, id, checked) => { root.cleanup-select(source, id, checked); }
+                    inspect(id) => { root.cleanup-inspect(id); }
+                    exclude(source, id) => { root.cleanup-exclude(source, id); }
+                    clear => { root.cleanup-clear(); }
+                    select-page => { root.cleanup-select-page(); }
+                    preview => { root.cleanup-preview(); }
+                    cancel => { root.cleanup-cancel(); }
+                    close-preview => { root.cleanup-close-preview(); }
+                }
                 if root.active-page == Page.settings: SettingsPage { app-version: root.app-version; }
             }
         }

@@ -6,6 +6,7 @@ use crate::storage::{self, Capacity, Discovery, Drive, format_bytes};
 
 mod analyzer;
 mod artifacts;
+mod cleanup;
 #[cfg(windows)]
 mod development;
 #[cfg(windows)]

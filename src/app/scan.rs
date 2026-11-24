@@ -16,6 +16,7 @@ use crate::{
 
 use super::analyzer::Analyzer;
 use super::artifacts::{Browser, Catalog};
+use super::cleanup::CleanupView;
 use super::{AppWindow, DirectoryDisplay, ScanDisplay, ScanPhase};
 #[cfg(windows)]
 use {
@@ -35,6 +36,7 @@ pub(super) struct ScanController {
     closing: Cell<bool>,
     artifacts: Rc<Browser>,
     analyzer: Rc<Analyzer>,
+    cleanup: Rc<CleanupView>,
     #[cfg(windows)]
     storage: Rc<StorageView>,
 }
@@ -42,10 +44,15 @@ pub(super) struct ScanController {
 enum Job {
     Picking(JoinHandle<Result<Option<PathBuf>, String>>),
     Scanning {
-        worker: JoinHandle<(ScanResult, Catalog, Option<crate::analysis::Catalog>)>,
+        worker: JoinHandle<ScanOutput>,
         cancellation: Arc<Cancellation>,
         progress: Arc<Mutex<ScanProgress>>,
         started: Instant,
+    },
+    Preview {
+        worker: JoinHandle<crate::cleanup::Plan>,
+        cancellation: Arc<Cancellation>,
+        progress: Arc<Mutex<(usize, usize)>>,
     },
     #[cfg(windows)]
     Development {
@@ -58,11 +65,19 @@ enum Job {
     },
 }
 
+struct ScanOutput {
+    result: ScanResult,
+    catalog: Catalog,
+    analysis: Option<crate::analysis::Catalog>,
+    cleanup: crate::cleanup::Registry,
+}
+
 impl ScanController {
     pub(super) fn attach(window: &AppWindow) -> Rc<Self> {
         let controller = Rc::new(Self {
             artifacts: Browser::attach(window),
             analyzer: Analyzer::attach(window),
+            cleanup: CleanupView::attach(window),
             #[cfg(windows)]
             storage: StorageView::attach(window),
             ..Self::default()
@@ -91,6 +106,20 @@ impl ScanController {
             }
         });
         let (scan, ui) = (Rc::clone(&controller), window.as_weak());
+        window.on_cleanup_preview(move || {
+            if let Some(window) = ui.upgrade() {
+                scan.start_preview(&window);
+            }
+        });
+        let (scan, ui) = (Rc::clone(&controller), window.as_weak());
+        window.on_cleanup_cancel(move || {
+            if let Some(window) = ui.upgrade()
+                && matches!(scan.job.borrow().as_ref(), Some(Job::Preview { .. }))
+            {
+                scan.cancel(&window);
+            }
+        });
+        let (scan, ui) = (Rc::clone(&controller), window.as_weak());
         window.on_analysis_rescan(move || {
             if let (Some(window), Some(path)) = (ui.upgrade(), scan.analyzer.scan_path()) {
                 scan.start(&window, path);
@@ -103,7 +132,7 @@ impl ScanController {
             }
             if let Some(window) = ui.upgrade() {
                 match scan.job.borrow().as_ref() {
-                    Some(Job::Scanning { .. }) => scan.closing.set(true),
+                    Some(Job::Scanning { .. } | Job::Preview { .. }) => scan.closing.set(true),
                     #[cfg(windows)]
                     Some(Job::Development { .. }) => scan.closing.set(true),
                     _ => return CloseRequestResponse::KeepWindowShown,
@@ -113,6 +142,43 @@ impl ScanController {
             CloseRequestResponse::KeepWindowShown
         });
         controller
+    }
+
+    fn start_preview(self: &Rc<Self>, window: &AppWindow) {
+        if self.job.borrow().is_some() {
+            return;
+        }
+        let Some(request) = self.cleanup.request(window) else {
+            return;
+        };
+        let cancellation = Arc::new(Cancellation::default());
+        let progress = Arc::new(Mutex::new((0, 0)));
+        let (stop, latest) = (Arc::clone(&cancellation), Arc::clone(&progress));
+        let worker = thread::Builder::new()
+            .name("cleanup-preview".into())
+            .spawn(move || {
+                crate::cleanup::preview(request, &stop, |done, total| {
+                    if let Ok(mut snapshot) = latest.lock() {
+                        *snapshot = (done, total);
+                    }
+                })
+            });
+        match worker {
+            Ok(worker) => {
+                window.set_cleanup_busy(true);
+                window.set_cleanup_cancelling(false);
+                *self.job.borrow_mut() = Some(Job::Preview {
+                    worker,
+                    cancellation,
+                    progress,
+                });
+                self.start_timer(window);
+            }
+            Err(error) => self.cleanup.finish(
+                window,
+                Err(format!("Could not start preview validation. {error}")),
+            ),
+        }
     }
 
     #[cfg(windows)]
@@ -145,6 +211,7 @@ impl ScanController {
             return;
         }
         let discovery = task.discover();
+        self.cleanup.invalidate(window);
         let generation = self.storage.begin(window, discovery);
         let cancellation = Arc::new(Cancellation::default());
         let progress = Arc::new(Mutex::new(Progress::default()));
@@ -191,6 +258,8 @@ impl ScanController {
         }
         window.set_scan_root(root.to_string_lossy().as_ref().into());
         clear_stats(window);
+        self.cleanup
+            .replace(window, crate::cleanup::Registry::default());
         self.artifacts.replace(window, Catalog::default());
         window.set_scan_error("".into());
         let cancellation = Arc::new(Cancellation::default());
@@ -207,9 +276,15 @@ impl ScanController {
                             *latest = snapshot;
                         }
                     });
+                let cleanup = crate::cleanup::Registry::from_scan(&mut result);
                 let analysis = crate::analysis::Catalog::from_scan(&mut result);
                 let catalog = Catalog::new(std::mem::take(&mut result.developer));
-                (result, catalog, analysis)
+                ScanOutput {
+                    result,
+                    catalog,
+                    analysis,
+                    cleanup,
+                }
             });
         match worker {
             Ok(worker) => {
@@ -273,6 +348,15 @@ impl ScanController {
 
     fn cancel(&self, window: &AppWindow) {
         match self.job.borrow().as_ref() {
+            Some(Job::Preview {
+                cancellation,
+                worker,
+                ..
+            }) => {
+                cancel_worker(cancellation, worker);
+                window.set_cleanup_cancelling(true);
+                window.set_cleanup_progress("Cancelling metadata validation…".into());
+            }
             Some(Job::Scanning {
                 cancellation,
                 worker,
@@ -298,6 +382,24 @@ impl ScanController {
         let mut job = self.job.borrow_mut();
         let finished = match job.as_ref() {
             Some(Job::Picking(worker)) => worker.is_finished(),
+            Some(Job::Preview {
+                worker,
+                cancellation,
+                progress,
+            }) => {
+                let finished = worker.is_finished();
+                if !finished && cancellation.is_cancelled() {
+                    cancel_worker(cancellation, worker);
+                } else if !finished && let Ok(snapshot) = progress.try_lock() {
+                    let (done, total) = *snapshot;
+                    if total > 0 {
+                        window.set_cleanup_progress(
+                            format!("{done} of {total} candidates checked").into(),
+                        );
+                    }
+                }
+                finished
+            }
             Some(Job::Scanning {
                 worker,
                 cancellation,
@@ -353,6 +455,19 @@ impl ScanController {
         self.timer.stop();
         // Join only after is_finished(), so the Slint event loop never waits on I/O.
         match work {
+            Job::Preview { worker, .. } => {
+                window.set_cleanup_busy(false);
+                window.set_cleanup_cancelling(false);
+                self.cleanup.finish(
+                    window,
+                    worker
+                        .join()
+                        .map_err(|_| "The preview worker stopped unexpectedly.".into()),
+                );
+                if self.closing.get() {
+                    let _ = window.hide();
+                }
+            }
             Job::Picking(worker) => {
                 window.set_picking_scan_folder(false);
                 match worker.join() {
@@ -370,7 +485,13 @@ impl ScanController {
             }
             Job::Scanning { worker, .. } => {
                 match worker.join() {
-                    Ok((result, catalog, analysis)) => {
+                    Ok(ScanOutput {
+                        result,
+                        catalog,
+                        analysis,
+                        cleanup,
+                    }) => {
+                        self.cleanup.replace(window, cleanup);
                         if let Some(analysis) = analysis {
                             self.analyzer.scan(window, analysis);
                         }
@@ -412,6 +533,14 @@ impl ScanController {
         self.timer.stop();
         if let Some(job) = self.job.borrow_mut().take() {
             match job {
+                Job::Preview {
+                    worker,
+                    cancellation,
+                    ..
+                } => {
+                    cancel_worker(&cancellation, &worker);
+                    let _ = worker.join();
+                }
                 Job::Scanning {
                     cancellation,
                     worker,

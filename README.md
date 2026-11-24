@@ -46,6 +46,12 @@ The inventory covers 23 tool providers across package managers, build tools, And
 
 Discovery uses local Windows directory metadata and supported paths. ByteBroom keeps project and global scan totals separate, skips network paths and reparse points, and reports logical sizes. Configuration-file discovery, Docker, WSL, and allocated-size estimation are planned. [Supported locations, overrides, and limits](docs/development-storage.md)
 
+## Cleanup preview
+
+After a complete project scan, open **Cleanup** or select **Review in Cleanup** in an artifact's details. Start with an empty selection, choose artifacts individually or select eligible entries on the current page, and select **Preview cleanup**. The preview shows exact paths, evidence, regeneration requirements, and validation failures. Changing the selection or exclusions discards the preview.
+
+Verified Python caches are available for bulk preview. Verified project-local `node_modules` and Cargo `target` require individual selection. Global resources and higher-risk outputs remain analysis-only. Both Recycle Bin and permanent deletion are unavailable in this milestone. Logical file length and available drive capacity use separate measurements. [Cleanup safety and coverage](docs/cleanup-safety.md)
+
 ## Windows development
 
 - Use [stable Rust and Cargo via rustup](https://rustup.rs/) with Rust 1.95 or newer and the `x86_64-pc-windows-msvc` target.
