@@ -14,6 +14,22 @@ Scan totals sum logical file lengths, which can differ from allocated disk space
 
 The desktop shell uses Rust 2024 and Slint 1.19.0 with the Winit backend and Slint's native software renderer. Cargo compiles the Slint files during the build.
 
+## Developer Artifacts
+
+After a scan, open **Artifacts** in the sidebar or select **View artifacts**. Search names and paths, filter by ecosystem, category, classification, or minimum size, and group results by project. Select **Details** to see the evidence, logical size, regeneration requirements, and warnings.
+
+| Ecosystem | Examples of detected project-local artifacts |
+| --- | --- |
+| JavaScript / TypeScript | `node_modules`, Next.js, Nuxt and SvelteKit output, Turborepo, Parcel, Angular and Vite caches, verified coverage, and some `dist` output |
+| Rust / Cargo | Project or workspace `target` |
+| Python | Environments with `pyvenv.cfg`, tox with supporting evidence, bytecode, pytest, mypy, and Ruff caches |
+| Java / Gradle and Maven | Project-local `.gradle`, Gradle module `build` with output markers, and Maven `target` |
+| .NET and Flutter / Dart | Project `bin` and `obj`, `.dart_tool`, and Flutter `build` with generated output markers |
+
+**High** confidence means the rule found stronger project or output evidence. **Contextual** means the layout is consistent with the tool and may need manual verification. Review classifications distinguish regenerable caches, artifacts that need setup to reproduce, and output that merits manual review. Exported deliverables and locally modified dependencies may be difficult to replace.
+
+Detection uses directory names and metadata within the selected scope. Custom output paths and undeclared workspace relationships can be missed. Results are marked partial after cancellation, access errors, or a retention limit. Detected logical size can differ from both allocated and reclaimable disk space.
+
 ## Windows development
 
 - Use [stable Rust and Cargo via rustup](https://rustup.rs/) with Rust 1.95 or newer and the `x86_64-pc-windows-msvc` target.
@@ -29,7 +45,7 @@ cargo run --locked
 
 If Cargo is installed and PowerShell cannot find it, add the rustup bin directory for that session with `$env:Path = "$env:USERPROFILE\.cargo\bin;$env:Path"`. If a build reports `link.exe` missing, use Visual Studio Installer to add the C++ workload and reopen the terminal.
 
-In the app, use the sidebar or Tab and Enter to move through the four pages. For a quick smoke test, select **Scan a folder…** and choose a small fixture with known file sizes.
+In the app, use the sidebar or Tab and Enter to move between pages. For a quick smoke test, select **Scan a folder…** and choose a small fixture with known file sizes.
 
 To build a Windows release executable, run `cargo build --release --locked`. The output is `target/release/bytebroom.exe`. For distribution, check runtime requirements on a clean Windows VM before adding installer metadata, signing, or an MSIX package. [Slint Windows packaging guide](https://docs.slint.dev/latest/docs/slint/guide/platforms/desktop/packaging/windows/)
 

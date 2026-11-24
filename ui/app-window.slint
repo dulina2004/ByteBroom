@@ -6,8 +6,10 @@ import { DashboardPage, DriveCardData } from "pages/dashboard.slint";
 import { DirectoryDisplay, ScanDisplay, ScanPage, ScanPhase } from "pages/scan.slint";
 import { CleanupPage } from "pages/cleanup.slint";
 import { SettingsPage } from "pages/settings.slint";
+import { ArtifactDetails, ArtifactFilter, ArtifactPage, ArtifactRow, ArtifactSummary } from "pages/artifacts.slint";
 
 export { DirectoryDisplay, DriveCardData, ScanDisplay, ScanPhase }
+export { ArtifactDetails, ArtifactFilter, ArtifactRow, ArtifactSummary }
 
 export component AppWindow inherits Window {
     in property <[DriveCardData]> drives;
@@ -24,10 +26,27 @@ export component AppWindow inherits Window {
     in property <string> scan-root;
     in property <string> scan-error;
     in property <bool> picking-scan-folder;
+    in property <ArtifactSummary> artifact-summary;
+    in property <ArtifactFilter> artifact-filter;
+    in property <ArtifactDetails> artifact-details;
+    in property <[ArtifactRow]> artifact-rows;
+    in property <[string]> artifact-ecosystems;
+    in property <[string]> artifact-categories;
+    in property <[string]> artifact-reviews;
+    in property <string> artifact-project;
+    in property <string> artifact-page;
+    in property <bool> artifact-previous;
+    in property <bool> artifact-next;
+    in property <bool> artifact-partial;
+    in property <bool> artifact-truncated;
     callback refresh-drives();
     callback scan-drive(string);
     callback pick-scan-folder();
     callback cancel-scan();
+    callback filter-artifacts(ArtifactFilter);
+    callback artifact-turn-page(int);
+    callback artifact-select(int);
+    callback artifact-clear-project();
     private property <Page> active-page: Page.dashboard;
     private property <bool> scan-busy:
         root.picking-scan-folder || root.scan-phase == ScanPhase.scanning || root.scan-phase == ScanPhase.cancelling;
@@ -73,6 +92,7 @@ export component AppWindow inherits Window {
                         Text {
                             text: root.active-page == Page.dashboard ? "Dashboard" :
                                 root.active-page == Page.scan ? "Scan" :
+                                root.active-page == Page.artifacts ? "Developer Artifacts" :
                                 root.active-page == Page.cleanup ? "Cleanup" : "Settings";
                             color: Theme.text;
                             font-size: 34px;
@@ -100,6 +120,7 @@ export component AppWindow inherits Window {
                     SecondaryText {
                         text: root.active-page == Page.dashboard ? "View capacity and free space for your Windows drives." :
                             root.active-page == Page.scan ? "Measure logical file sizes in a drive or folder." :
+                            root.active-page == Page.artifacts ? "Explore detected dependencies, caches, and build output." :
                             root.active-page == Page.cleanup ? "Preview where cleanup candidates will appear for review." :
                             "View the default appearance and application version.";
                     }
@@ -126,6 +147,31 @@ export component AppWindow inherits Window {
                     scan-root: root.scan-root;
                     error: root.scan-error;
                     cancel => { root.cancel-scan(); }
+                    view-artifacts => {
+                        root.active-page = Page.artifacts;
+                        content.content-y = 0px;
+                    }
+                }
+                if root.active-page == Page.artifacts: ArtifactPage {
+                    phase: root.scan-phase;
+                    progress: root.scan-progress;
+                    summary: root.artifact-summary;
+                    filters: root.artifact-filter;
+                    details: root.artifact-details;
+                    rows: root.artifact-rows;
+                    ecosystems: root.artifact-ecosystems;
+                    categories: root.artifact-categories;
+                    reviews: root.artifact-reviews;
+                    project: root.artifact-project;
+                    page-label: root.artifact-page;
+                    can-previous: root.artifact-previous;
+                    can-next: root.artifact-next;
+                    partial: root.artifact-partial;
+                    truncated: root.artifact-truncated;
+                    filter(new-filters) => { root.filter-artifacts(new-filters); }
+                    turn-page(delta) => { root.artifact-turn-page(delta); }
+                    select(index) => { root.artifact-select(index); }
+                    clear-project => { root.artifact-clear-project(); }
                 }
                 if root.active-page == Page.cleanup: CleanupPage { }
                 if root.active-page == Page.settings: SettingsPage { app-version: root.app-version; }

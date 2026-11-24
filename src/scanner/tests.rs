@@ -3,6 +3,7 @@ use super::{
 };
 use std::{fs, io, os::windows::fs::OpenOptionsExt, path::Path, process::Command, time::Duration};
 use tempfile::TempDir;
+mod developer;
 use windows_sys::Win32::Storage::FileSystem::{FILE_FLAG_BACKUP_SEMANTICS, FILE_LIST_DIRECTORY};
 
 fn fixture() -> TempDir {
@@ -238,7 +239,7 @@ fn rejects_a_junction_swapped_in_after_enumeration() {
     let mut directory = Directory::open_root(&root, &Cancellation::default())
         .unwrap()
         .unwrap();
-    let Some(Entry::Directory(name)) = directory.next().unwrap() else {
+    let Some(Entry::Directory(name)) = directory.next(false).unwrap() else {
         panic!("expected the original directory entry");
     };
     fs::rename(&child, root.join("original")).unwrap();

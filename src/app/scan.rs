@@ -14,6 +14,7 @@ use crate::{
     storage::format_bytes,
 };
 
+use super::artifacts::{Browser, Catalog};
 use super::{AppWindow, DirectoryDisplay, ScanDisplay, ScanPhase};
 
 const UI_INTERVAL: Duration = Duration::from_millis(160);
@@ -23,12 +24,13 @@ pub(super) struct ScanController {
     job: RefCell<Option<Job>>,
     timer: Timer,
     closing: Cell<bool>,
+    artifacts: Rc<Browser>,
 }
 
 enum Job {
     Picking(JoinHandle<Result<Option<PathBuf>, String>>),
     Scanning {
-        worker: JoinHandle<ScanResult>,
+        worker: JoinHandle<(ScanResult, Catalog)>,
         cancellation: Arc<Cancellation>,
         progress: Arc<Mutex<ScanProgress>>,
         started: Instant,
@@ -37,7 +39,10 @@ enum Job {
 
 impl ScanController {
     pub(super) fn attach(window: &AppWindow) -> Rc<Self> {
-        let controller = Rc::new(Self::default());
+        let controller = Rc::new(Self {
+            artifacts: Browser::attach(window),
+            ..Self::default()
+        });
 
         let (scan, ui) = (Rc::clone(&controller), window.as_weak());
         window.on_scan_drive(move |letter| {
@@ -82,6 +87,7 @@ impl ScanController {
         }
         window.set_scan_root(root.to_string_lossy().as_ref().into());
         clear_stats(window);
+        self.artifacts.replace(window, Catalog::default());
         window.set_scan_error("".into());
         let cancellation = Arc::new(Cancellation::default());
         let progress = Arc::new(Mutex::new(ScanProgress::default()));
@@ -91,11 +97,14 @@ impl ScanController {
         let worker = thread::Builder::new()
             .name("filesystem-scan".into())
             .spawn(move || {
-                scanner::scan(ScanRequest { root }, &worker_cancellation, |snapshot| {
-                    if let Ok(mut latest) = worker_progress.lock() {
-                        *latest = snapshot;
-                    }
-                })
+                let mut result =
+                    scanner::scan(ScanRequest { root }, &worker_cancellation, |snapshot| {
+                        if let Ok(mut latest) = worker_progress.lock() {
+                            *latest = snapshot;
+                        }
+                    });
+                let catalog = Catalog::new(std::mem::take(&mut result.developer));
+                (result, catalog)
             });
         match worker {
             Ok(worker) => {
@@ -142,6 +151,7 @@ impl ScanController {
                 self.start_timer(window);
             }
             Err(error) => {
+                self.artifacts.replace(window, Catalog::default());
                 picker_error(window, format!("Could not open the folder picker. {error}"))
             }
         }
@@ -209,14 +219,21 @@ impl ScanController {
                     Ok(Ok(Some(root))) => self.start(window, root),
                     Ok(Ok(None)) => {}
                     Ok(Err(error)) => {
+                        self.artifacts.replace(window, Catalog::default());
                         picker_error(window, format!("Could not choose a folder. {error}"))
                     }
-                    Err(_) => picker_error(window, "The folder picker closed unexpectedly.".into()),
+                    Err(_) => {
+                        self.artifacts.replace(window, Catalog::default());
+                        picker_error(window, "The folder picker closed unexpectedly.".into());
+                    }
                 }
             }
             Job::Scanning { worker, .. } => {
                 match worker.join() {
-                    Ok(result) => show_result(window, result),
+                    Ok((result, catalog)) => {
+                        self.artifacts.replace(window, catalog);
+                        show_result(window, result);
+                    }
                     Err(_) => show_error(window, "The scan worker stopped unexpectedly.".into()),
                 }
                 if self.closing.get() {
@@ -246,7 +263,7 @@ impl ScanController {
     }
 }
 
-fn cancel_worker(cancellation: &Cancellation, worker: &JoinHandle<ScanResult>) {
+fn cancel_worker(cancellation: &Cancellation, worker: &JoinHandle<(ScanResult, Catalog)>) {
     cancellation.cancel();
     #[cfg(windows)]
     {
@@ -306,6 +323,8 @@ fn display(progress: ScanProgress) -> ScanDisplay {
         directories: progress.directories.to_string().into(),
         inaccessible: progress.inaccessible.to_string().into(),
         skipped_links: progress.skipped_links.to_string().into(),
+        projects: progress.projects.to_string().into(),
+        artifact_candidates: progress.artifact_candidates.to_string().into(),
         elapsed: format!(
             "{:02}:{:02}:{:02}",
             seconds / 3600,

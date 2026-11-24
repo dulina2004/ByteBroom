@@ -36,13 +36,14 @@ use windows_sys::{
 };
 
 use super::Cancellation;
+use crate::detectors::Facts;
 
 const DIRECTORY_BUFFER_WORDS: usize = 1024;
 const SHARE_MODE: u32 = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
 const NAME_OFFSET: usize = offset_of!(FILE_FULL_DIR_INFORMATION, FileName);
 
 pub(super) enum Entry {
-    File(u64),
+    File(u64, Facts),
     Directory(Vec<u16>),
     Link,
     Invalid,
@@ -193,7 +194,7 @@ impl Directory {
         }))
     }
 
-    pub(super) fn next(&mut self) -> io::Result<Option<Entry>> {
+    pub(super) fn next(&mut self, collect_evidence: bool) -> io::Result<Option<Entry>> {
         loop {
             if self.offset == self.end && !self.refill()? {
                 return Ok(None);
@@ -203,7 +204,7 @@ impl Directory {
             // to the number of bytes written within this allocation.
             let data =
                 unsafe { std::slice::from_raw_parts(buffer.as_ptr().cast::<u8>(), self.end) };
-            let (advance, entry) = parse_record(&data[self.offset..])?;
+            let (advance, entry) = parse_record(&data[self.offset..], collect_evidence)?;
             self.offset = if advance == 0 {
                 self.end
             } else {
@@ -253,7 +254,7 @@ impl Directory {
     }
 }
 
-fn parse_record(data: &[u8]) -> io::Result<(usize, Option<Entry>)> {
+fn parse_record(data: &[u8], collect_evidence: bool) -> io::Result<(usize, Option<Entry>)> {
     let header = data.get(..NAME_OFFSET).ok_or_else(invalid_record)?;
     // The fixed-size fields below all precede FileName in FILE_FULL_DIR_INFORMATION.
     let read = |offset| u32::from_le_bytes(header[offset..offset + 4].try_into().unwrap());
@@ -287,7 +288,14 @@ fn parse_record(data: &[u8]) -> io::Result<(usize, Option<Entry>)> {
     } else {
         let offset = offset_of!(FILE_FULL_DIR_INFORMATION, EndOfFile);
         let length = i64::from_le_bytes(header[offset..offset + 8].try_into().unwrap());
-        u64::try_from(length).map_or(Entry::Invalid, Entry::File)
+        u64::try_from(length).map_or(Entry::Invalid, |bytes| {
+            let facts = if collect_evidence {
+                Facts::from_windows_file(name)
+            } else {
+                Facts::default()
+            };
+            Entry::File(bytes, facts)
+        })
     };
     Ok((next, Some(entry)))
 }

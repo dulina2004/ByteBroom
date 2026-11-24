@@ -4,6 +4,7 @@
 )]
 
 mod app;
+mod detectors;
 mod scanner;
 mod storage;
 #[cfg(windows)]

@@ -12,6 +12,8 @@ export struct ScanDisplay {
     inaccessible: string,
     skipped-links: string,
     elapsed: string,
+    projects: string,
+    artifact-candidates: string,
 }
 
 export struct DirectoryDisplay {
@@ -19,7 +21,7 @@ export struct DirectoryDisplay {
     logical-size: string,
 }
 
-component ScanMetric inherits Panel {
+export component ScanMetric inherits Panel {
     in property <string> label;
     in property <string> value;
     min-width: 111px;
@@ -42,6 +44,7 @@ export component ScanPage inherits VerticalLayout {
     in property <string> scan-root;
     in property <string> error;
     callback cancel();
+    callback view-artifacts();
     private property <bool> running: root.phase == ScanPhase.scanning || root.phase == ScanPhase.cancelling;
     private property <bool> show-totals:
         root.phase != ScanPhase.idle && (root.phase != ScanPhase.failed || (root.progress.directories != "0" && root.progress.directories != ""));
@@ -82,6 +85,11 @@ export component ScanPage inherits VerticalLayout {
                     height: 34px;
                     clicked => { root.cancel(); }
                 }
+                if !root.running && root.show-totals: Button {
+                    text: "View artifacts";
+                    height: 34px;
+                    clicked => { root.view-artifacts(); }
+                }
             }
             if root.scan-root != "": SecondaryText { text: root.scan-root; }
             if root.running: ProgressIndicator { indeterminate: true; }
@@ -101,6 +109,9 @@ export component ScanPage inherits VerticalLayout {
         }
         SecondaryText {
             text: root.progress.inaccessible + " inaccessible  ·  " + root.progress.skipped-links + " reparse points skipped";
+        }
+        if root.running: SecondaryText {
+            text: root.progress.projects + " project roots observed  ·  " + root.progress.artifact-candidates + " artifact candidates";
         }
     }
 

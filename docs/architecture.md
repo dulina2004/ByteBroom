@@ -28,4 +28,14 @@ A background worker replaces a single progress snapshot at most about eight time
 
 The native folder picker runs on a dedicated Windows STA thread and uses the selection-only tree style. The app retains the selected path in memory for the duration of the UI session.
 
-A future CLI can call the same scanner without opening a window. Keep artifact detection and cleanup policy separate from enumeration.
+A future CLI can call the same scanner without opening a window.
+
+## Developer artifact detection
+
+`src/detectors/` matches project and output markers against directory records. The scanner folds child sizes, counts, and access failures into the parent as each directory closes. Artifact measurement reuses those totals and issues no separate traversal. Files contribute their logical lengths and marker bits. Individual file paths are discarded.
+
+The detector retains at most 12,000 relevant directory observations within an estimated 16 MiB observation budget, with capacity reserved for project markers. After traversal, it resolves records in parent-first order. A project can supply more than one ecosystem. Rules select immediate, grandparent, or nearest relevant project ownership. A classified artifact owns its whole measured subtree, so descendant artifacts and projects are excluded from the artifact totals. Known dependency and protected trees skip project detection while still contributing to general scan totals.
+
+`src/app/artifacts.rs` builds search and sort indexes on the scan worker. The UI filters the retained records in memory and renders 12 rows per page. Cancelling, encountering access errors, or exceeding an observation limit marks results partial.
+
+To add a detector, register contextual markers in `src/detectors/rules.rs`, choose an ownership relationship, category, confidence, and review classification, and add positive and false-positive fixtures under `src/scanner/tests/`. Use metadata already available during traversal and keep each rule independent of Slint.

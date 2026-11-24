@@ -1,0 +1,273 @@
+import { Button, ComboBox, LineEdit, ProgressIndicator } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { Glyph } from "../components/icon.slint";
+import { EmptyState, Panel, PanelHeading, SecondaryText } from "../components/panel.slint";
+import { ScanDisplay, ScanMetric, ScanPhase } from "scan.slint";
+
+export struct ArtifactSummary {
+    projects: string,
+    artifacts: string,
+    logical-size: string,
+    ecosystems: string,
+}
+
+export struct ArtifactFilter {
+    query: string,
+    ecosystem: int,
+    category: int,
+    review: int,
+    minimum-size: int,
+    sort: int,
+    grouped: bool,
+}
+
+export struct ArtifactRow {
+    index: int,
+    name: string,
+    path: string,
+    logical-size: string,
+    context: string,
+    status: string,
+    partial: bool,
+}
+
+export struct ArtifactDetails {
+    open: bool,
+    index: int,
+    path: string,
+    association: string,
+    classification: string,
+    measurement: string,
+    evidence: string,
+    description: string,
+    regeneration: string,
+    warning: string,
+}
+
+component DetailLine inherits VerticalLayout {
+    in property <string> label;
+    in property <string> value;
+    spacing: 3px;
+    Text { text: root.label; color: Theme.text; font-size: 13px; font-weight: 600; }
+    SecondaryText { text: root.value; wrap: char-wrap; font-size: 13px; }
+}
+
+component ArtifactItem inherits Panel {
+    in property <ArtifactRow> entry;
+    in property <ArtifactDetails> details;
+    in property <bool> grouped;
+    callback select(int);
+    private property <bool> expanded: !root.grouped && root.details.open && root.details.index == root.entry.index;
+    min-height: item-layout.min-height;
+    vertical-stretch: 0;
+    border-color: root.expanded ? Theme.accent : Theme.stroke;
+
+    item-layout := VerticalLayout {
+        padding: 14px;
+        spacing: 8px;
+        alignment: start;
+        HorizontalLayout {
+            spacing: 12px;
+            Text {
+                text: root.entry.name;
+                color: Theme.text;
+                font-size: 16px;
+                font-weight: 650;
+                overflow: elide;
+                min-width: 0px;
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+            }
+            Text {
+                text: root.entry.logical-size;
+                color: Theme.accent;
+                font-size: 16px;
+                font-weight: 650;
+                vertical-alignment: center;
+            }
+            Button {
+                text: root.grouped ? "Open project" : root.expanded ? "Hide details" : "Details";
+                accessible-label: self.text + " for " + root.entry.name;
+                height: 30px;
+                clicked => { root.select(root.expanded ? -1 : root.entry.index); }
+            }
+        }
+        SecondaryText { text: root.entry.context; font-size: 13px; }
+        Text {
+            text: root.entry.path;
+            color: Theme.secondary;
+            font-size: 12px;
+            min-width: 0px;
+            overflow: elide;
+        }
+        Text {
+            text: root.entry.status + (root.entry.partial ? " • Partial measurement" : "");
+            color: root.entry.partial ? Theme.warning : Theme.secondary;
+            font-size: 12px;
+            wrap: word-wrap;
+        }
+        if root.expanded: VerticalLayout {
+            spacing: 10px;
+            Rectangle { height: 1px; background: Theme.stroke; }
+            DetailLine { label: "Full path"; value: root.details.path; }
+            DetailLine { label: "Project and ecosystem"; value: root.details.association; }
+            DetailLine { label: "Logical size"; value: root.details.measurement; }
+            DetailLine { label: "Classification"; value: root.details.classification; }
+            DetailLine { label: "Detection evidence"; value: root.details.evidence; }
+            DetailLine { label: "Contents"; value: root.details.description; }
+            DetailLine { label: "Regeneration"; value: root.details.regeneration; }
+            SecondaryText { text: root.details.warning; color: Theme.warning; font-size: 13px; }
+        }
+    }
+}
+
+export component ArtifactPage inherits VerticalLayout {
+    in property <ScanPhase> phase;
+    in property <ScanDisplay> progress;
+    in property <ArtifactSummary> summary;
+    in property <ArtifactFilter> filters;
+    in property <ArtifactDetails> details;
+    in property <[ArtifactRow]> rows;
+    in property <[string]> ecosystems;
+    in property <[string]> categories;
+    in property <[string]> reviews;
+    in property <string> project;
+    in property <string> page-label;
+    in property <bool> can-previous;
+    in property <bool> can-next;
+    in property <bool> partial;
+    in property <bool> truncated;
+    callback filter(ArtifactFilter);
+    callback turn-page(int);
+    callback select(int);
+    callback clear-project();
+    private property <bool> running: root.phase == ScanPhase.scanning || root.phase == ScanPhase.cancelling;
+    private property <bool> finished: root.phase != ScanPhase.idle && !root.running;
+    spacing: 16px;
+    alignment: start;
+
+    if root.phase == ScanPhase.idle: EmptyState {
+        glyph: Glyph.spark;
+        title: "No scan performed";
+        detail: "Scan a drive or folder to discover developer projects and artifacts.";
+    }
+    if root.running: Panel {
+        min-height: 120px;
+        vertical-stretch: 0;
+        VerticalLayout {
+            alignment: center;
+            spacing: 10px;
+            padding: 18px;
+            PanelHeading { text: root.phase == ScanPhase.cancelling ? "Cancelling scan…" : "Looking for project artifacts…"; }
+            SecondaryText {
+                text: root.progress.projects + " project roots observed  ·  " + root.progress.artifact-candidates + " artifact candidates";
+            }
+            ProgressIndicator { indeterminate: true; }
+        }
+    }
+    if root.finished: VerticalLayout {
+        spacing: 14px;
+        alignment: start;
+        HorizontalLayout {
+            spacing: 12px;
+            ScanMetric { label: "Projects"; value: root.summary.projects; }
+            ScanMetric { label: "Artifacts"; value: root.summary.artifacts; }
+            ScanMetric { label: "Detected logical size"; value: root.summary.logical-size; }
+            ScanMetric { label: "Ecosystems"; value: root.summary.ecosystems; }
+        }
+        if root.phase == ScanPhase.cancelled || root.phase == ScanPhase.failed || root.partial: SecondaryText {
+            color: Theme.warning;
+            text: root.phase == ScanPhase.cancelled ? "Scan cancelled. Developer artifact results are partial." :
+                root.phase == ScanPhase.failed ? "Scan failed. Any developer artifact results shown are partial." :
+                root.truncated ? "The retention limit was reached. Counts and sizes reflect retained results." :
+                "Some entries were inaccessible. Developer artifact results may be incomplete.";
+        }
+        if root.truncated && root.phase != ScanPhase.completed: SecondaryText {
+            color: Theme.warning;
+            text: "The retention limit was reached. Counts and sizes reflect retained results.";
+        }
+
+        Panel {
+            min-height: filter-layout.min-height;
+            vertical-stretch: 0;
+            filter-layout := VerticalLayout {
+                spacing: 10px;
+                padding: 14px;
+                function update(grouped: bool) {
+                    root.filter({
+                        query: search.text, ecosystem: ecosystem.current-index,
+                        category: category.current-index, review: classification.current-index,
+                        sort: sort.current-index, minimum-size: minimum.current-index, grouped: grouped,
+                    });
+                }
+                HorizontalLayout {
+                    spacing: 10px;
+                    search := LineEdit {
+                        text: root.filters.query;
+                        placeholder-text: "Search projects, artifacts, or paths";
+                        accessible-label: "Search projects, artifacts, or paths";
+                        horizontal-stretch: 1;
+                        edited => { filter-layout.update(root.filters.grouped); }
+                    }
+                    Button {
+                        text: root.filters.grouped ? "Show artifacts" : "Group by project";
+                        clicked => { filter-layout.update(!root.filters.grouped); }
+                    }
+                    sort := ComboBox {
+                        model: ["Largest first", "Smallest first", "Name"];
+                        current-index: root.filters.sort; accessible-label: "Sort results";
+                        selected => { filter-layout.update(root.filters.grouped); }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    ecosystem := ComboBox {
+                        model: root.ecosystems; current-index: root.filters.ecosystem;
+                        accessible-label: "Ecosystem";
+                        selected => { filter-layout.update(root.filters.grouped); }
+                    }
+                    category := ComboBox {
+                        model: root.categories; current-index: root.filters.category;
+                        accessible-label: "Artifact category";
+                        selected => { filter-layout.update(root.filters.grouped); }
+                    }
+                    classification := ComboBox {
+                        model: root.reviews; current-index: root.filters.review;
+                        accessible-label: "Review classification";
+                        selected => { filter-layout.update(root.filters.grouped); }
+                    }
+                    minimum := ComboBox {
+                        model: ["Any size", "At least 1 MiB", "At least 100 MiB", "At least 1 GiB"];
+                        current-index: root.filters.minimum-size; accessible-label: "Minimum size";
+                        selected => { filter-layout.update(root.filters.grouped); }
+                    }
+                }
+            }
+        }
+
+        if root.project != "": HorizontalLayout {
+            spacing: 10px;
+            SecondaryText { text: "Project: " + root.project; vertical-alignment: center; }
+            Button { text: "Back to projects"; clicked => { root.clear-project(); } }
+        }
+
+        HorizontalLayout {
+            spacing: 10px;
+            PanelHeading { text: root.filters.grouped ? "Projects" : "Artifacts"; horizontal-stretch: 1; vertical-alignment: center; }
+            SecondaryText { text: root.page-label; vertical-alignment: center; }
+            Button { text: "Previous"; enabled: root.can-previous; clicked => { root.turn-page(-1); } }
+            Button { text: "Next"; enabled: root.can-next; clicked => { root.turn-page(1); } }
+        }
+        if root.rows.length == 0: EmptyState {
+            glyph: Glyph.scan;
+            title: !root.filters.grouped && root.summary.artifacts == "0" ? "No developer artifacts found" : "No matching results";
+            detail: !root.filters.grouped && root.summary.artifacts == "0" ?
+                "Only directories with supporting project evidence appear here." : "Change the search or filters to see more results.";
+        }
+        for row in root.rows: ArtifactItem {
+            entry: row; grouped: root.filters.grouped; details: root.details;
+            select(index) => { root.select(index); }
+        }
+        SecondaryText { text: "Sizes are logical file lengths. Allocated and reclaimable disk space can differ."; }
+    }
+}
