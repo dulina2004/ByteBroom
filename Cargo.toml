@@ -7,7 +7,14 @@ description = "A fast, lightweight disk analyzer and cleanup tool for developers
 publish = false
 
 [dependencies]
-slint = { version = "=1.19.0", default-features = false, features = ["std", "backend-winit", "renderer-software", "accessibility", "compat-1-18"] }
+slint = { version = "=1.19.0", default-features = false, features = ["std", "backend-winit", "renderer-software", "accessibility", "compat-1-18", "raw-window-handle-06"] }
+
+[target.'cfg(windows)'.dependencies]
+raw-window-handle = "0.6.2"
+windows-sys = { version = "0.61.2", features = ["Wdk_Foundation", "Wdk_Storage_FileSystem", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_System_Diagnostics_Debug", "Win32_System_IO", "Win32_System_WindowsProgramming", "Win32_UI_Shell_Common"] }
 
 [build-dependencies]
 slint-build = "=1.19.0"
+
+[dev-dependencies]
+tempfile = "3.27.0"

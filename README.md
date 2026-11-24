@@ -6,7 +6,11 @@ ByteBroom aims to help developers understand how dependencies, build artifacts, 
 
 ## Current status
 
-This initial preview has a dark dashboard, sample C: and D: drives, and placeholder Scan, Cleanup, and Settings pages. All capacities and reclaimable estimates are mock data. The application performs zero drive scans or file deletions.
+The dashboard shows the drive letters visible to the current Windows session, with volume labels when available, drive types, capacities, and usage. Select **Refresh** to update the snapshot. Totals reflect the listed drive letters. Capacities use binary units such as GiB and TiB.
+
+Select **Scan** on a drive card or **Scan a folder…** to start a read-only metadata scan. The Scan page shows live counts and elapsed time, then lists up to twelve of the largest immediate subdirectories. Select **Cancel Scan** to stop and keep partial results. The scanner reports inaccessible entries and skips symbolic links, junctions, mount points, and other reparse points.
+
+Scan totals sum logical file lengths, which can differ from allocated disk space. Each hard-linked name counts as a separate entry. Results reflect the metadata seen during the scan as the filesystem changes.
 
 The desktop shell uses Rust 2024 and Slint 1.19.0 with the Winit backend and Slint's native software renderer. Cargo compiles the Slint files during the build.
 
@@ -25,13 +29,13 @@ cargo run --locked
 
 If Cargo is installed and PowerShell cannot find it, add the rustup bin directory for that session with `$env:Path = "$env:USERPROFILE\.cargo\bin;$env:Path"`. If a build reports `link.exe` missing, use Visual Studio Installer to add the C++ workload and reopen the terminal.
 
-In the app, use the sidebar or Tab and Enter to move through the four pages. Confirm the dashboard shows **Mock data** and the Scan action is disabled.
+In the app, use the sidebar or Tab and Enter to move through the four pages. For a quick smoke test, select **Scan a folder…** and choose a small fixture with known file sizes.
 
 To build a Windows release executable, run `cargo build --release --locked`. The output is `target/release/bytebroom.exe`. For distribution, check runtime requirements on a clean Windows VM before adding installer metadata, signing, or an MSIX package. [Slint Windows packaging guide](https://docs.slint.dev/latest/docs/slint/guide/platforms/desktop/packaging/windows/)
 
 ## Contributing
 
-Read [Repository Guidelines](AGENTS.md) and [Architecture](docs/architecture.md). Use focused pull requests, describe what you verified, and add screenshots for visual changes. Keep `Cargo.lock` in version control. The next milestone is a cancellable, read-only scan of an explicitly selected directory. See the [Roadmap](docs/roadmap.md).
+Read [Repository Guidelines](AGENTS.md) and [Architecture](docs/architecture.md). Use focused pull requests, describe what you verified, and add screenshots for visual changes. Keep `Cargo.lock` in version control. See the [Roadmap](docs/roadmap.md) for upcoming work.
 
 ```powershell
 cargo fmt --all -- --check

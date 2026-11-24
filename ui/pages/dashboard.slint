@@ -1,16 +1,17 @@
+import { Button } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
 import { Glyph, Icon } from "../components/icon.slint";
-import { Panel, PanelHeading, SecondaryText } from "../components/panel.slint";
+import { EmptyState, Panel, PanelHeading, SecondaryText } from "../components/panel.slint";
 
 export struct DriveCardData {
     letter: string,
     name: string,
+    kind: string,
     total: string,
     used: string,
     free: string,
-    reclaimable: string,
+    usage: string,
     used-ratio: float,
-    reclaimable-ratio: float,
 }
 
 component MetricCard inherits Panel {
@@ -50,9 +51,12 @@ component DriveValue inherits VerticalLayout {
 
 component DriveCard inherits Panel {
     in property <DriveCardData> drive;
+    in property <bool> scan-enabled;
+    callback scan();
     min-width: 265px;
-    height: 170px;
+    height: 203px;
     horizontal-stretch: 1;
+    private property <color> usage-ink: root.drive.used-ratio >= 0.9 ? Theme.warning : Theme.used;
 
     VerticalLayout {
         padding: 17px;
@@ -62,23 +66,43 @@ component DriveCard inherits Panel {
         HorizontalLayout {
             spacing: 10px;
             Rectangle {
-                width: 34px;
-                height: 34px;
+                width: 38px;
+                height: 36px;
                 border-radius: 8px;
-                background: Theme.raised;
-                Icon { glyph: Glyph.drive; ink: Theme.accent; }
+                background: Theme.selected;
+                Text {
+                    text: root.drive.letter;
+                    color: Theme.accent;
+                    font-size: 15px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
             }
             VerticalLayout {
                 alignment: center;
                 spacing: 1px;
                 horizontal-stretch: 1;
                 Text {
-                    text: root.drive.name + " (" + root.drive.letter + ")";
+                    text: root.drive.name == "" ? root.drive.kind : root.drive.name;
                     color: Theme.text;
                     font-size: 15px;
                     font-weight: 650;
+                    overflow: elide;
+                    min-width: 0px;
                 }
-                Text { text: root.drive.total + " capacity"; color: Theme.secondary; font-size: 12px; }
+                if root.drive.name != "": Text {
+                    text: root.drive.kind;
+                    color: Theme.secondary;
+                    font-size: 12px;
+                }
+            }
+            Text {
+                text: root.drive.usage;
+                color: root.usage-ink;
+                font-size: 13px;
+                font-weight: 650;
+                vertical-alignment: center;
             }
         }
 
@@ -90,32 +114,29 @@ component DriveCard inherits Panel {
 
             Rectangle {
                 x: 0;
-                width: parent.width * (root.drive.used-ratio - root.drive.reclaimable-ratio);
-                background: Theme.used;
-            }
-            Rectangle {
-                x: parent.width * (root.drive.used-ratio - root.drive.reclaimable-ratio);
-                width: parent.width * root.drive.reclaimable-ratio;
-                background: Theme.reclaimable;
+                width: parent.width * root.drive.used-ratio;
+                background: root.usage-ink;
             }
         }
 
         HorizontalLayout {
             spacing: 10px;
+            DriveValue { label: "Total"; value: root.drive.total; }
             DriveValue { label: "Used"; value: root.drive.used; }
             DriveValue { label: "Free"; value: root.drive.free; }
-            DriveValue { label: "Reclaimable"; value: root.drive.reclaimable; ink: Theme.reclaimable; }
+        }
+        HorizontalLayout {
+            alignment: end;
+            Button {
+                text: "Scan";
+                accessible-label: "Scan drive " + root.drive.letter;
+                enabled: root.scan-enabled;
+                height: 30px;
+                min-width: 68px;
+                clicked => { root.scan(); }
+            }
         }
     }
-}
-
-component LegendItem inherits HorizontalLayout {
-    in property <string> label;
-    in property <color> ink;
-    spacing: 6px;
-    alignment: start;
-    Rectangle { width: 9px; height: 9px; border-radius: 3px; background: root.ink; }
-    Text { text: root.label; color: Theme.secondary; font-size: 12px; vertical-alignment: center; }
 }
 
 export component DashboardPage inherits VerticalLayout {
@@ -123,41 +144,57 @@ export component DashboardPage inherits VerticalLayout {
     in property <string> total-space;
     in property <string> used-space;
     in property <string> free-space;
-    in property <string> reclaimable-space;
+    in property <bool> loading;
+    in property <string> error;
+    in property <string> notice;
+    in property <bool> scan-enabled;
+    callback scan-drive(string);
+    private property <bool> has-drives: root.drives.length > 0;
     spacing: 20px;
     alignment: start;
 
-    VerticalLayout {
+    if root.has-drives: VerticalLayout {
         spacing: 12px;
         PanelHeading { text: "Storage overview"; }
         HorizontalLayout {
             spacing: 12px;
-            MetricCard { glyph: Glyph.drive; label: "Total disk space"; value: root.total-space; ink: Theme.text; }
+            MetricCard { glyph: Glyph.drive; label: "Listed drive capacity"; value: root.total-space; ink: Theme.text; }
             MetricCard { glyph: Glyph.used; label: "Used space"; value: root.used-space; }
             MetricCard { glyph: Glyph.free; label: "Free space"; value: root.free-space; ink: Theme.text; }
-            MetricCard {
-                glyph: Glyph.spark;
-                label: "Potentially reclaimable";
-                value: root.reclaimable-space;
-                ink: Theme.reclaimable;
-            }
         }
     }
 
-    VerticalLayout {
+    if root.has-drives: VerticalLayout {
         spacing: 12px;
-        PanelHeading { text: "Example drives"; }
-        HorizontalLayout {
+        PanelHeading { text: "Drives"; }
+        if root.loading: SecondaryText { text: "Refreshing drive information…"; }
+        if root.notice != "": SecondaryText {
+            text: root.notice;
+            color: Theme.warning;
+        }
+        FlexboxLayout {
             spacing: 12px;
-            for drive in root.drives: DriveCard { drive: drive; }
+            alignment: stretch;
+            for drive in root.drives: DriveCard {
+                drive: drive;
+                scan-enabled: root.scan-enabled;
+                scan => { root.scan-drive(drive.letter); }
+            }
         }
-        HorizontalLayout {
-            spacing: 18px;
-            alignment: start;
-            LegendItem { label: "Other used"; ink: Theme.used; }
-            LegendItem { label: "Potentially reclaimable"; ink: Theme.reclaimable; }
-            LegendItem { label: "Free"; ink: Theme.free; }
-        }
-        SecondaryText { text: "Potentially reclaimable space is included in used space."; }
+    }
+    if root.loading && !root.has-drives: EmptyState {
+        glyph: Glyph.drive;
+        title: "Discovering drives…";
+        detail: "Reading Windows volume capacity.";
+    }
+    if !root.loading && root.error != "": EmptyState {
+        glyph: Glyph.drive;
+        title: "Couldn’t load drive information";
+        detail: root.error;
+    }
+    if !root.loading && root.error == "" && !root.has-drives: EmptyState {
+        glyph: Glyph.drive;
+        title: "No drives found";
+        detail: "Connect a drive and select Refresh.";
     }
 }

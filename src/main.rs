@@ -4,7 +4,10 @@
 )]
 
 mod app;
-mod models;
+mod scanner;
+mod storage;
+#[cfg(windows)]
+mod windows_fs;
 
 fn main() -> Result<(), slint::PlatformError> {
     app::run()

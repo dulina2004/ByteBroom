@@ -1,36 +1,135 @@
-import { Button, ComboBox } from "std-widgets.slint";
+import { Button, ProgressIndicator } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
 import { Glyph } from "../components/icon.slint";
-import { Panel, PanelHeading, SecondaryText, EmptyState } from "../components/panel.slint";
+import { EmptyState, Panel, PanelHeading, SecondaryText } from "../components/panel.slint";
+
+export enum ScanPhase { idle, scanning, cancelling, completed, cancelled, failed }
+
+export struct ScanDisplay {
+    logical-size: string,
+    files: string,
+    directories: string,
+    inaccessible: string,
+    skipped-links: string,
+    elapsed: string,
+}
+
+export struct DirectoryDisplay {
+    name: string,
+    logical-size: string,
+}
+
+component ScanMetric inherits Panel {
+    in property <string> label;
+    in property <string> value;
+    min-width: 111px;
+    height: 82px;
+    horizontal-stretch: 1;
+
+    VerticalLayout {
+        padding: 14px;
+        spacing: 4px;
+        alignment: center;
+        Text { text: root.label; color: Theme.secondary; font-size: 12px; }
+        Text { text: root.value; color: Theme.text; font-size: 22px; font-weight: 680; }
+    }
+}
 
 export component ScanPage inherits VerticalLayout {
+    in property <ScanPhase> phase;
+    in property <ScanDisplay> progress;
+    in property <[DirectoryDisplay]> directories;
+    in property <string> scan-root;
+    in property <string> error;
+    callback cancel();
+    private property <bool> running: root.phase == ScanPhase.scanning || root.phase == ScanPhase.cancelling;
+    private property <bool> show-totals:
+        root.phase != ScanPhase.idle && (root.phase != ScanPhase.failed || (root.progress.directories != "0" && root.progress.directories != ""));
+
     spacing: 16px;
     alignment: start;
 
-    Panel {
-        min-height: 120px;
+    if root.phase == ScanPhase.idle: EmptyState {
+        glyph: Glyph.scan;
+        title: "Choose a scan location";
+        detail: "Select Scan a folder, or start a scan from a drive card on the dashboard.";
+    }
+
+    if root.phase != ScanPhase.idle: Panel {
+        min-height: scan-status.min-height;
         vertical-stretch: 0;
-        VerticalLayout {
-            padding: 17px;
-            spacing: 9px;
-            alignment: center;
-            PanelHeading { text: "Scan location"; }
+
+        scan-status := VerticalLayout {
+            padding: 18px;
+            spacing: 10px;
+            alignment: start;
             HorizontalLayout {
-                alignment: start;
-                spacing: 10px;
-                ComboBox {
-                    min-width: 170px;
-                    enabled: false;
-                    model: ["Example drive C:"];
-                    current-index: 0;
+                spacing: 12px;
+                PanelHeading {
+                    text: root.phase == ScanPhase.scanning ? "Scanning…" :
+                        root.phase == ScanPhase.cancelling ? "Cancelling scan…" :
+                        root.phase == ScanPhase.completed ? "Scan completed" :
+                        root.phase == ScanPhase.cancelled ? "Scan cancelled" : "Scan failed";
+                    color: root.phase == ScanPhase.failed ? Theme.warning : Theme.text;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                    accessible-role: text;
+                    accessible-live-region: polite;
                 }
-                Button { text: "Scan not implemented"; enabled: false; }
+                if root.running: Button {
+                    text: "Cancel Scan";
+                    enabled: root.phase == ScanPhase.scanning;
+                    height: 34px;
+                    clicked => { root.cancel(); }
+                }
             }
+            if root.scan-root != "": SecondaryText { text: root.scan-root; }
+            if root.running: ProgressIndicator { indeterminate: true; }
+            if root.phase == ScanPhase.cancelled: SecondaryText { text: "The numbers below reflect the portion scanned before cancellation."; }
+            if root.phase == ScanPhase.failed: SecondaryText { text: root.error; }
         }
     }
 
-    EmptyState {
-        glyph: Glyph.scan;
-        title: "No scan results";
-        detail: "Results will appear here after a scan.";
+    if root.show-totals: VerticalLayout {
+        spacing: 12px;
+        HorizontalLayout {
+            spacing: 12px;
+            ScanMetric { label: "Logical size"; value: root.progress.logical-size; }
+            ScanMetric { label: "Files"; value: root.progress.files; }
+            ScanMetric { label: "Directories"; value: root.progress.directories; }
+            ScanMetric { label: "Elapsed"; value: root.progress.elapsed; }
+        }
+        SecondaryText {
+            text: root.progress.inaccessible + " inaccessible  ·  " + root.progress.skipped-links + " reparse points skipped";
+        }
+    }
+
+    if !root.running && root.show-totals: Panel {
+        min-height: directory-table.min-height;
+        vertical-stretch: 0;
+
+        directory-table := VerticalLayout {
+            padding: 18px;
+            spacing: 10px;
+            alignment: start;
+            PanelHeading { text: "Largest immediate subdirectories"; }
+            if root.directories.length == 0: SecondaryText { text: "No immediate subdirectories were measured."; }
+            for row in root.directories: VerticalLayout {
+                spacing: 8px;
+                Rectangle { height: 1px; background: Theme.stroke; }
+                HorizontalLayout {
+                    spacing: 12px;
+                    Text {
+                        text: row.name;
+                        color: Theme.text;
+                        overflow: elide;
+                        min-width: 0px;
+                        horizontal-stretch: 1;
+                    }
+                    Text { text: row.logical-size; color: Theme.secondary; }
+                }
+            }
+            SecondaryText { text: "Logical size counts file lengths and can differ from space allocated on disk."; }
+        }
     }
 }

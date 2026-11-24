@@ -2,7 +2,7 @@
 
 ## Project Structure
 
-- `src/main.rs` starts the Windows-first desktop application. `src/app.rs` owns Slint initialization and maps Rust models to UI data. Keep `src/models.rs` independent of Slint so future scanner and CLI code can share it.
+- `src/main.rs` starts the Windows-first desktop application. `src/app.rs` owns Slint initialization and maps storage results to UI data. Keep `src/storage/` independent of Slint so future scanner and CLI code can reuse it.
 - `ui/app-window.slint` owns window navigation. Reuse the theme and controls in `ui/theme.slint` and `ui/components/`. Keep each page in `ui/pages/`.
 - See [Architecture](docs/architecture.md) for module boundaries and [Roadmap](docs/roadmap.md) for scope.
 

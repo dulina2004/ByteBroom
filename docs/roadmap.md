@@ -3,15 +3,14 @@
 ## Application shell
 
 - Dark native Slint desktop window with Dashboard, Scan, Cleanup, and Settings.
-- Example drives and a segmented storage usage display with clearly labeled mock data.
+- Windows drive discovery with volume metadata, usage bars, and on-demand refresh.
 - Cargo validation commands and Windows release build instructions.
 
-## Next milestone — Read-only folder scan
+## Read-only drive and folder scan
 
-- Let users choose a single directory and confirm the scan scope.
-- Enumerate off the UI thread with bounded memory, progress, and cancellation.
-- Report accessible sizes and skipped entries. Skip symlinks and junctions by default, and test permission and cancellation behavior with generated fixtures.
-- Measure throughput, memory, and UI responsiveness before adding a full-drive scan.
+- Start a read-only scan from a drive card or the Windows folder picker.
+- Enumerate off the UI thread with bounded memory, live progress, and cancellation.
+- Report logical sizes, inaccessible entries, skipped reparse points, and the largest immediate subdirectories.
 
 ## Later milestones
 

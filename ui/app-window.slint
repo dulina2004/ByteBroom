@@ -1,38 +1,41 @@
-import { ScrollView } from "std-widgets.slint";
+import { Button, ScrollView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { Page, Sidebar } from "components/sidebar.slint";
 import { SecondaryText } from "components/panel.slint";
 import { DashboardPage, DriveCardData } from "pages/dashboard.slint";
-import { ScanPage } from "pages/scan.slint";
+import { DirectoryDisplay, ScanDisplay, ScanPage, ScanPhase } from "pages/scan.slint";
 import { CleanupPage } from "pages/cleanup.slint";
 import { SettingsPage } from "pages/settings.slint";
 
-export { DriveCardData }
-
-component MockLabel inherits Rectangle {
-    height: 28px;
-    width: 104px;
-    border-radius: 14px;
-    border-width: 1px;
-    border-color: #336158;
-    background: #1a3534;
-
-    HorizontalLayout {
-        spacing: 6px;
-        alignment: center;
-        Rectangle { width: 6px; height: 6px; border-radius: 3px; background: Theme.reclaimable; }
-        Text { text: "Mock data"; color: Theme.reclaimable; font-size: 12px; font-weight: 650; vertical-alignment: center; }
-    }
-}
+export { DirectoryDisplay, DriveCardData, ScanDisplay, ScanPhase }
 
 export component AppWindow inherits Window {
     in property <[DriveCardData]> drives;
     in property <string> total-space;
     in property <string> used-space;
     in property <string> free-space;
-    in property <string> reclaimable-space;
+    in property <bool> loading-drives;
+    in property <string> drive-error;
+    in property <string> drive-notice;
     in property <string> app-version;
+    in property <ScanPhase> scan-phase: ScanPhase.idle;
+    in property <ScanDisplay> scan-progress;
+    in property <[DirectoryDisplay]> scan-directories;
+    in property <string> scan-root;
+    in property <string> scan-error;
+    in property <bool> picking-scan-folder;
+    callback refresh-drives();
+    callback scan-drive(string);
+    callback pick-scan-folder();
+    callback cancel-scan();
     private property <Page> active-page: Page.dashboard;
+    private property <bool> scan-busy:
+        root.picking-scan-folder || root.scan-phase == ScanPhase.scanning || root.scan-phase == ScanPhase.cancelling;
+
+    function show-scan() {
+        root.active-page = Page.scan;
+        content.content-y = 0px;
+    }
 
     title: "ByteBroom";
     background: Theme.canvas;
@@ -77,11 +80,26 @@ export component AppWindow inherits Window {
                             vertical-alignment: center;
                             horizontal-stretch: 1;
                         }
-                        MockLabel { }
+                        if root.active-page == Page.dashboard || root.active-page == Page.scan: Button {
+                            text: root.picking-scan-folder ? "Opening picker…" : "Scan a folder…";
+                            enabled: !root.scan-busy;
+                            height: 34px;
+                            clicked => {
+                                root.show-scan();
+                                root.pick-scan-folder();
+                            }
+                        }
+                        if root.active-page == Page.dashboard: Button {
+                            text: root.loading-drives ? "Refreshing…" : "Refresh";
+                            enabled: !root.loading-drives;
+                            min-width: 106px;
+                            height: 34px;
+                            clicked => { root.refresh-drives(); }
+                        }
                     }
                     SecondaryText {
-                        text: root.active-page == Page.dashboard ? "Explore storage on two sample drives." :
-                            root.active-page == Page.scan ? "Preview the options for a future read-only scan." :
+                        text: root.active-page == Page.dashboard ? "View capacity and free space for your Windows drives." :
+                            root.active-page == Page.scan ? "Measure logical file sizes in a drive or folder." :
                             root.active-page == Page.cleanup ? "Preview where cleanup candidates will appear for review." :
                             "View the default appearance and application version.";
                     }
@@ -92,9 +110,23 @@ export component AppWindow inherits Window {
                     total-space: root.total-space;
                     used-space: root.used-space;
                     free-space: root.free-space;
-                    reclaimable-space: root.reclaimable-space;
+                    loading: root.loading-drives;
+                    error: root.drive-error;
+                    notice: root.drive-notice;
+                    scan-enabled: !root.scan-busy;
+                    scan-drive(letter) => {
+                        root.show-scan();
+                        root.scan-drive(letter);
+                    }
                 }
-                if root.active-page == Page.scan: ScanPage { }
+                if root.active-page == Page.scan: ScanPage {
+                    phase: root.scan-phase;
+                    progress: root.scan-progress;
+                    directories: root.scan-directories;
+                    scan-root: root.scan-root;
+                    error: root.scan-error;
+                    cancel => { root.cancel-scan(); }
+                }
                 if root.active-page == Page.cleanup: CleanupPage { }
                 if root.active-page == Page.settings: SettingsPage { app-version: root.app-version; }
             }
