@@ -11,6 +11,8 @@ ByteBroom is a single Cargo package, `bytebroom`. It uses Slint at runtime, `sli
 | `src/storage/mod.rs`                            | Defines drive snapshots, capacity arithmetic, and formatting independently of Slint.                  |
 | `src/storage/windows.rs`                        | Queries drive letters, types, labels, and capacity from Win32.                                       |
 | `src/scanner/`                                 | Traverses Windows directories and returns plain Rust progress, statistics, and results.               |
+| `src/global_caches/`                           | Resolves known developer storage, validates local paths, and schedules selected measurement roots.   |
+| `src/app/development.rs`                       | Presents the inventory, selection, filters, and paginated results in Slint.                          |
 | `src/app/scan.rs` and `src/app/folder_picker.rs` | Coordinate one scan or folder picker at a time and present the results in Slint.                      |
 | `build.rs`                                      | Compiles `ui/app-window.slint` with Slint's dark Fluent style for standard widgets.                  |
 | `ui/app-window.slint`                           | Owns the active page and the shared header.                                                          |
@@ -39,3 +41,15 @@ The detector retains at most 12,000 relevant directory observations within an es
 `src/app/artifacts.rs` builds search and sort indexes on the scan worker. The UI filters the retained records in memory and renders 12 rows per page. Cancelling, encountering access errors, or exceeding an observation limit marks results partial.
 
 To add a detector, register contextual markers in `src/detectors/rules.rs`, choose an ownership relationship, category, confidence, and review classification, and add positive and false-positive fixtures under `src/scanner/tests/`. Use metadata already available during traversal and keep each rule independent of Slint.
+
+## Global developer storage
+
+The Development Storage workflow separates discovery from measurement. Static providers build typed location plans from injected known folders, a fixed environment-variable allowlist, and session-only custom roots. Discovery verifies expected directories or a bounded set of well-known child layouts. It caps the preview at 512 locations, inspects up to 1,024 immediate entries per layout, and shows notices for invalid settings and incomplete discovery.
+
+The Windows adapter resolves the current user's known folders and checks drive-letter device mappings before probing paths. The scanner opens directory components relative to their parent handles and rejects reparse points. Discovery identifies duplicate roots using the volume serial number and file ID, and retains a normalized volume path for ancestry checks. Measurement verifies the directory still matches its discovery identity before reusing the opened handle. [Windows file identity](https://learn.microsoft.com/windows/win32/api/winbase/ns-winbase-file_id_info) and [normalized handle paths](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getfinalpathnamebyhandlew)
+
+Each discovered descendant has its own boundary. The shared walker skips separately listed descendants when measuring a parent, even when the descendant is unchecked. Each selected row contributes its own logical total once. The global worker uses the same iterative scanner without project detection. Android snapshot and virtual disk summaries come from metadata in that same pass. Hard-linked file names are counted individually. Project and global scans keep their own totals. A combined cross-scan total would require additional overlap reconciliation.
+
+The shared scan controller runs one folder picker, project scan, discovery, or measurement job at a time. Worker threads replace a progress snapshot and the Slint timer polls it. Storage scan IDs guard against stale updates. Preview scope shows selected drives before measurement. Rust owns the in-memory inventory and filters, and Slint displays up to ten rows per page. Risk, confidence, and measurement status are separate fields.
+
+See the [provider guide](development-storage.md) for adding location rules and fixtures.

@@ -6,6 +6,8 @@ use crate::storage::{self, Capacity, Discovery, Drive, format_bytes};
 
 mod artifacts;
 #[cfg(windows)]
+mod development;
+#[cfg(windows)]
 mod folder_picker;
 mod scan;
 

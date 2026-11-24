@@ -7,9 +7,11 @@ import { DirectoryDisplay, ScanDisplay, ScanPage, ScanPhase } from "pages/scan.s
 import { CleanupPage } from "pages/cleanup.slint";
 import { SettingsPage } from "pages/settings.slint";
 import { ArtifactDetails, ArtifactFilter, ArtifactPage, ArtifactRow, ArtifactSummary } from "pages/artifacts.slint";
+import { DevelopmentPage, StorageDetails, StorageFilter, StorageGroup, StoragePhase, StorageRow, StorageSummary } from "pages/development.slint";
 
 export { DirectoryDisplay, DriveCardData, ScanDisplay, ScanPhase }
 export { ArtifactDetails, ArtifactFilter, ArtifactRow, ArtifactSummary }
+export { StorageDetails, StorageFilter, StorageGroup, StoragePhase, StorageRow, StorageSummary }
 
 export component AppWindow inherits Window {
     in property <[DriveCardData]> drives;
@@ -39,6 +41,22 @@ export component AppWindow inherits Window {
     in property <bool> artifact-next;
     in property <bool> artifact-partial;
     in property <bool> artifact-truncated;
+    in property <StoragePhase> cache-phase;
+    in property <StorageSummary> cache-summary;
+    in property <StorageFilter> cache-filters;
+    in property <StorageDetails> cache-details;
+    in property <[StorageRow]> cache-rows;
+    in property <[StorageGroup]> cache-groups;
+    in property <[string]> cache-providers;
+    in property <[string]> cache-choices;
+    in property <string> cache-custom-summary;
+    in property <string> cache-progress;
+    in property <string> cache-notice;
+    in property <string> cache-scope;
+    in property <string> cache-page-label;
+    in property <bool> cache-can-measure;
+    in property <bool> cache-can-previous;
+    in property <bool> cache-can-next;
     callback refresh-drives();
     callback scan-drive(string);
     callback pick-scan-folder();
@@ -47,9 +65,20 @@ export component AppWindow inherits Window {
     callback artifact-turn-page(int);
     callback artifact-select(int);
     callback artifact-clear-project();
+    callback cache-discover(int);
+    callback cache-add-custom(int, string);
+    callback cache-clear-custom();
+    callback cache-measure();
+    callback cache-cancel();
+    callback cache-filter(StorageFilter);
+    callback cache-turn(int);
+    callback cache-select(int, bool);
+    callback cache-select-filtered(bool);
+    callback cache-inspect(int);
     private property <Page> active-page: Page.dashboard;
     private property <bool> scan-busy:
-        root.picking-scan-folder || root.scan-phase == ScanPhase.scanning || root.scan-phase == ScanPhase.cancelling;
+        root.picking-scan-folder || root.scan-phase == ScanPhase.scanning || root.scan-phase == ScanPhase.cancelling
+        || root.cache-phase == StoragePhase.discovering || root.cache-phase == StoragePhase.measuring || root.cache-phase == StoragePhase.cancelling;
 
     function show-scan() {
         root.active-page = Page.scan;
@@ -93,6 +122,7 @@ export component AppWindow inherits Window {
                             text: root.active-page == Page.dashboard ? "Dashboard" :
                                 root.active-page == Page.scan ? "Scan" :
                                 root.active-page == Page.artifacts ? "Developer Artifacts" :
+                                root.active-page == Page.development ? "Development Storage" :
                                 root.active-page == Page.cleanup ? "Cleanup" : "Settings";
                             color: Theme.text;
                             font-size: 34px;
@@ -121,6 +151,7 @@ export component AppWindow inherits Window {
                         text: root.active-page == Page.dashboard ? "View capacity and free space for your Windows drives." :
                             root.active-page == Page.scan ? "Measure logical file sizes in a drive or folder." :
                             root.active-page == Page.artifacts ? "Explore detected dependencies, caches, and build output." :
+                            root.active-page == Page.development ? "Discover and measure shared caches, installed tools, and local environment data." :
                             root.active-page == Page.cleanup ? "Preview where cleanup candidates will appear for review." :
                             "View the default appearance and application version.";
                     }
@@ -172,6 +203,35 @@ export component AppWindow inherits Window {
                     turn-page(delta) => { root.artifact-turn-page(delta); }
                     select(index) => { root.artifact-select(index); }
                     clear-project => { root.artifact-clear-project(); }
+                }
+                if root.active-page == Page.development: DevelopmentPage {
+                    phase: root.cache-phase;
+                    scan-busy: root.scan-busy;
+                    summary: root.cache-summary;
+                    filters: root.cache-filters;
+                    details: root.cache-details;
+                    rows: root.cache-rows;
+                    groups: root.cache-groups;
+                    providers: root.cache-providers;
+                    choices: root.cache-choices;
+                    custom-summary: root.cache-custom-summary;
+                    progress: root.cache-progress;
+                    notice: root.cache-notice;
+                    scope: root.cache-scope;
+                    page-label: root.cache-page-label;
+                    can-measure: root.cache-can-measure;
+                    can-previous: root.cache-can-previous;
+                    can-next: root.cache-can-next;
+                    discover(provider) => { root.cache-discover(provider); }
+                    add-custom(provider, path) => { root.cache-add-custom(provider, path); }
+                    clear-custom => { root.cache-clear-custom(); }
+                    measure => { root.cache-measure(); }
+                    cancel => { root.cache-cancel(); }
+                    filter(filters) => { root.cache-filter(filters); }
+                    turn(delta) => { root.cache-turn(delta); }
+                    select(index, checked) => { root.cache-select(index, checked); }
+                    select-filtered(checked) => { root.cache-select-filtered(checked); }
+                    inspect(index) => { root.cache-inspect(index); }
                 }
                 if root.active-page == Page.cleanup: CleanupPage { }
                 if root.active-page == Page.settings: SettingsPage { app-version: root.app-version; }

@@ -30,6 +30,14 @@ After a scan, open **Artifacts** in the sidebar or select **View artifacts**. Se
 
 Detection uses directory names and metadata within the selected scope. Custom output paths and undeclared workspace relationships can be missed. Results are marked partial after cancellation, access errors, or a retention limit. Detected logical size can differ from both allocated and reclaimable disk space.
 
+## Development Storage
+
+Open **Dev Storage** and select **Discover locations** to preview global developer storage. Choose one provider or search all supported tools. Review the listed paths and drives, exclude any locations you want to leave out, and select **Measure selected**. Choose a provider and select **Custom paths…** to add a documented tool directory for this session. Custom paths and environment overrides start unchecked.
+
+The inventory covers 23 tool providers across package managers, build tools, Android SDKs and virtual devices, IDEs, browser automation, and machine learning. Browse measured and unmeasured results by tool, drive, ecosystem, classification, confidence, or measurement status. The details explain why each resource was found and what it contains. Android virtual devices, editor backups, and local history are marked protected.
+
+Discovery uses local Windows directory metadata and supported paths. ByteBroom keeps project and global scan totals separate, skips network paths and reparse points, and reports logical sizes. Configuration-file discovery, Docker, WSL, and allocated-size estimation are planned. [Supported locations, overrides, and limits](docs/development-storage.md)
+
 ## Windows development
 
 - Use [stable Rust and Cargo via rustup](https://rustup.rs/) with Rust 1.95 or newer and the `x86_64-pc-windows-msvc` target.
@@ -55,9 +63,9 @@ Read [Repository Guidelines](AGENTS.md) and [Architecture](docs/architecture.md)
 
 ```powershell
 cargo fmt --all -- --check
-cargo check
-cargo clippy --all-targets -- -D warnings
-cargo test
+cargo check --locked
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked
 ```
 
 ## Licensing

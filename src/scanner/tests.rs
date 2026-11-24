@@ -22,7 +22,7 @@ fn run(root: &Path) -> ScanResult {
     )
 }
 
-fn junction(link: &Path, target: &Path) {
+pub(crate) fn junction(link: &Path, target: &Path) {
     // Create only inside the generated fixture. Pass paths as data to the fixed command.
     let output = Command::new("powershell.exe")
         .args(["-NoProfile", "-NonInteractive", "-Command",
@@ -239,7 +239,7 @@ fn rejects_a_junction_swapped_in_after_enumeration() {
     let mut directory = Directory::open_root(&root, &Cancellation::default())
         .unwrap()
         .unwrap();
-    let Some(Entry::Directory(name)) = directory.next(false).unwrap() else {
+    let Some(Entry::Directory(name)) = directory.next(false, false).unwrap() else {
         panic!("expected the original directory entry");
     };
     fs::rename(&child, root.join("original")).unwrap();

@@ -16,6 +16,14 @@ use crate::{
 
 use super::artifacts::{Browser, Catalog};
 use super::{AppWindow, DirectoryDisplay, ScanDisplay, ScanPhase};
+#[cfg(windows)]
+use {
+    super::{
+        StoragePhase,
+        development::{StorageView, Task},
+    },
+    crate::global_caches::{Inventory, Progress},
+};
 
 const UI_INTERVAL: Duration = Duration::from_millis(160);
 
@@ -25,6 +33,8 @@ pub(super) struct ScanController {
     timer: Timer,
     closing: Cell<bool>,
     artifacts: Rc<Browser>,
+    #[cfg(windows)]
+    storage: Rc<StorageView>,
 }
 
 enum Job {
@@ -35,14 +45,27 @@ enum Job {
         progress: Arc<Mutex<ScanProgress>>,
         started: Instant,
     },
+    #[cfg(windows)]
+    Development {
+        worker: JoinHandle<Inventory>,
+        cancellation: Arc<Cancellation>,
+        progress: Arc<Mutex<Progress>>,
+        generation: u64,
+        discovery: bool,
+        started: Instant,
+    },
 }
 
 impl ScanController {
     pub(super) fn attach(window: &AppWindow) -> Rc<Self> {
         let controller = Rc::new(Self {
             artifacts: Browser::attach(window),
+            #[cfg(windows)]
+            storage: StorageView::attach(window),
             ..Self::default()
         });
+        #[cfg(windows)]
+        controller.attach_storage(window);
 
         let (scan, ui) = (Rc::clone(&controller), window.as_weak());
         window.on_scan_drive(move |letter| {
@@ -72,6 +95,8 @@ impl ScanController {
             if let Some(window) = ui.upgrade() {
                 match scan.job.borrow().as_ref() {
                     Some(Job::Scanning { .. }) => scan.closing.set(true),
+                    #[cfg(windows)]
+                    Some(Job::Development { .. }) => scan.closing.set(true),
                     _ => return CloseRequestResponse::KeepWindowShown,
                 }
                 scan.cancel(&window);
@@ -79,6 +104,74 @@ impl ScanController {
             CloseRequestResponse::KeepWindowShown
         });
         controller
+    }
+
+    #[cfg(windows)]
+    fn attach_storage(self: &Rc<Self>, window: &AppWindow) {
+        let (scan, ui) = (Rc::clone(self), window.as_weak());
+        window.on_cache_discover(move |provider| {
+            if let Some(window) = ui.upgrade() {
+                scan.start_storage(&window, scan.storage.discovery_task(provider));
+            }
+        });
+        let (scan, ui) = (Rc::clone(self), window.as_weak());
+        window.on_cache_measure(move || {
+            if let Some(window) = ui.upgrade()
+                && let Some(task) = scan.storage.measurement_task()
+            {
+                scan.start_storage(&window, task);
+            }
+        });
+        let (scan, ui) = (Rc::clone(self), window.as_weak());
+        window.on_cache_cancel(move || {
+            if let Some(window) = ui.upgrade() {
+                scan.cancel(&window);
+            }
+        });
+    }
+
+    #[cfg(windows)]
+    fn start_storage(self: &Rc<Self>, window: &AppWindow, task: Task) {
+        if self.job.borrow().is_some() {
+            return;
+        }
+        let discovery = task.discover();
+        let generation = self.storage.begin(window, discovery);
+        let cancellation = Arc::new(Cancellation::default());
+        let progress = Arc::new(Mutex::new(Progress::default()));
+        let (worker_cancellation, worker_progress) =
+            (Arc::clone(&cancellation), Arc::clone(&progress));
+        let started = Instant::now();
+        let worker = thread::Builder::new()
+            .name("development-storage".into())
+            .spawn(move || {
+                task.run(&worker_cancellation, |snapshot| {
+                    if let Ok(mut latest) = worker_progress.lock() {
+                        *latest = snapshot;
+                    }
+                })
+            });
+        match worker {
+            Ok(worker) => {
+                *self.job.borrow_mut() = Some(Job::Development {
+                    worker,
+                    cancellation,
+                    progress,
+                    generation,
+                    discovery,
+                    started,
+                });
+                self.start_timer(window);
+            }
+            Err(error) => self.storage.finish(
+                window,
+                generation,
+                discovery,
+                Err(format!(
+                    "Could not start the development storage worker. {error}"
+                )),
+            ),
+        }
     }
 
     fn start(self: &Rc<Self>, window: &AppWindow, root: PathBuf) {
@@ -167,14 +260,25 @@ impl ScanController {
     }
 
     fn cancel(&self, window: &AppWindow) {
-        if let Some(Job::Scanning {
-            cancellation,
-            worker,
-            ..
-        }) = self.job.borrow().as_ref()
-        {
-            cancel_worker(cancellation, worker);
-            window.set_scan_phase(ScanPhase::Cancelling);
+        match self.job.borrow().as_ref() {
+            Some(Job::Scanning {
+                cancellation,
+                worker,
+                ..
+            }) => {
+                cancel_worker(cancellation, worker);
+                window.set_scan_phase(ScanPhase::Cancelling);
+            }
+            #[cfg(windows)]
+            Some(Job::Development {
+                cancellation,
+                worker,
+                ..
+            }) => {
+                cancel_worker(cancellation, worker);
+                window.set_cache_phase(StoragePhase::Cancelling);
+            }
+            _ => {}
         }
     }
 
@@ -200,6 +304,30 @@ impl ScanController {
                     };
                     drop(snapshot);
                     window.set_scan_progress(display(progress));
+                }
+                finished
+            }
+            #[cfg(windows)]
+            Some(Job::Development {
+                worker,
+                cancellation,
+                progress,
+                generation,
+                discovery,
+                started,
+            }) => {
+                let finished = worker.is_finished();
+                if !finished && cancellation.is_cancelled() {
+                    cancel_worker(cancellation, worker);
+                }
+                if !finished && let Ok(snapshot) = progress.try_lock() {
+                    let progress = Progress {
+                        elapsed: started.elapsed(),
+                        ..*snapshot
+                    };
+                    drop(snapshot);
+                    self.storage
+                        .progress(window, *generation, *discovery, progress);
                 }
                 finished
             }
@@ -240,6 +368,25 @@ impl ScanController {
                     let _ = window.hide();
                 }
             }
+            #[cfg(windows)]
+            Job::Development {
+                worker,
+                generation,
+                discovery,
+                ..
+            } => {
+                self.storage.finish(
+                    window,
+                    generation,
+                    discovery,
+                    worker
+                        .join()
+                        .map_err(|_| "The development storage worker stopped unexpectedly.".into()),
+                );
+                if self.closing.get() {
+                    let _ = window.hide();
+                }
+            }
         }
     }
 
@@ -255,6 +402,15 @@ impl ScanController {
                     cancel_worker(&cancellation, &worker);
                     let _ = worker.join();
                 }
+                #[cfg(windows)]
+                Job::Development {
+                    cancellation,
+                    worker,
+                    ..
+                } => {
+                    cancel_worker(&cancellation, &worker);
+                    let _ = worker.join();
+                }
                 Job::Picking(_) => {
                     // An unexpected event-loop shutdown exits the process. No scan is running.
                 }
@@ -263,7 +419,7 @@ impl ScanController {
     }
 }
 
-fn cancel_worker(cancellation: &Cancellation, worker: &JoinHandle<(ScanResult, Catalog)>) {
+fn cancel_worker<T>(cancellation: &Cancellation, worker: &JoinHandle<T>) {
     cancellation.cancel();
     #[cfg(windows)]
     {

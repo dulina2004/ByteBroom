@@ -1,0 +1,302 @@
+import { Button, CheckBox, ComboBox, LineEdit, ProgressIndicator } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { Glyph } from "../components/icon.slint";
+import { EmptyState, Panel, PanelHeading, SecondaryText } from "../components/panel.slint";
+import { ScanMetric } from "scan.slint";
+
+export enum StoragePhase { idle, discovering, ready, measuring, cancelling, completed, cancelled, failed }
+export struct StorageSummary { tools: string, locations: string, logical: string, drives: string, review: string, protected-size: string }
+export struct StorageFilter { query: string, facet: int, choice: int, sort: int }
+export struct StorageRow {
+    index: int, title: string, tool: string, path: string, size: string, category: string, drive: string,
+    classification: string, status: string, selected: bool, selectable: bool,
+}
+export struct StorageDetails {
+    open: bool, index: int, path: string, source: string, evidence: string, description: string,
+    effects: string, restoration: string, measurement: string, note: string,
+}
+export struct StorageGroup { name: string, size: string, ratio: float }
+
+component StorageItem inherits Panel {
+    in property <StorageRow> item;
+    in property <StorageDetails> details;
+    in property <bool> busy;
+    callback select(int, bool);
+    callback inspect(int);
+    private property <bool> expanded: root.details.open && root.details.index == root.item.index;
+    min-height: layout.min-height;
+    vertical-stretch: 0;
+    border-color: root.expanded ? Theme.accent : Theme.stroke;
+
+    layout := VerticalLayout {
+        padding: 14px;
+        spacing: 8px;
+        alignment: start;
+        HorizontalLayout {
+            spacing: 10px;
+            CheckBox {
+                checked: root.item.selected;
+                enabled: root.item.selectable && !root.busy;
+                accessible-label: "Include " + root.item.title + " on " + root.item.drive;
+                toggled => { root.select(root.item.index, self.checked); }
+            }
+            Text {
+                text: root.item.title;
+                color: Theme.text;
+                font-weight: 650;
+                font-size: 16px;
+                min-width: 0px;
+                overflow: elide;
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+            }
+            Text {
+                text: root.item.size;
+                color: Theme.accent;
+                font-weight: 650;
+                vertical-alignment: center;
+            }
+            Button {
+                text: root.expanded ? "Hide details" : "Details";
+                accessible-label: self.text + " for " + root.item.title;
+                clicked => { root.inspect(root.expanded ? -1 : root.item.index); }
+            }
+        }
+        SecondaryText { text: root.item.tool + "  •  " + root.item.category + "  •  " + root.item.drive; font-size: 13px; }
+        Text { text: root.item.path; color: Theme.secondary; overflow: elide; min-width: 0px; font-size: 12px; }
+        SecondaryText { text: root.item.classification + "  •  " + root.item.status; font-size: 13px; }
+        if root.expanded: VerticalLayout {
+            spacing: 8px;
+            Rectangle { height: 1px; background: Theme.stroke; }
+            SecondaryText { text: root.details.path; wrap: char-wrap; }
+            SecondaryText { text: root.details.source + "  •  " + root.details.evidence; }
+            SecondaryText { text: root.details.measurement; }
+            SecondaryText { text: root.details.description; }
+            SecondaryText { text: root.details.effects; color: Theme.warning; }
+            SecondaryText { text: root.details.restoration; }
+            if root.details.note != "": SecondaryText { text: root.details.note; color: Theme.warning; }
+        }
+    }
+}
+
+export component DevelopmentPage inherits VerticalLayout {
+    in property <StoragePhase> phase;
+    in property <bool> scan-busy;
+    in property <StorageSummary> summary;
+    in property <StorageFilter> filters;
+    in property <StorageDetails> details;
+    in property <[StorageRow]> rows;
+    in property <[StorageGroup]> groups;
+    in property <[string]> providers;
+    in property <[string]> choices;
+    in property <string> custom-summary;
+    in property <string> progress;
+    in property <string> notice;
+    in property <string> scope;
+    in property <string> page-label;
+    in property <bool> can-measure;
+    in property <bool> can-previous;
+    in property <bool> can-next;
+    callback discover(int);
+    callback add-custom(int, string);
+    callback clear-custom();
+    callback measure();
+    callback cancel();
+    callback filter(StorageFilter);
+    callback turn(int);
+    callback select(int, bool);
+    callback select-filtered(bool);
+    callback inspect(int);
+    private property <bool> running: root.phase == StoragePhase.discovering || root.phase == StoragePhase.measuring || root.phase == StoragePhase.cancelling;
+    private property <bool> custom-open;
+    private property <bool> breakdown-open;
+    spacing: 16px;
+    alignment: start;
+
+    Panel {
+        min-height: setup.min-height;
+        vertical-stretch: 0;
+        setup := VerticalLayout {
+            padding: 14px;
+            spacing: 10px;
+            PanelHeading { text: "Scan scope"; }
+            SecondaryText { text: "Discovery checks known local tool locations. Review their paths and drives before measuring selected rows."; }
+            HorizontalLayout {
+                spacing: 8px;
+                provider := ComboBox {
+                    model: root.providers;
+                    enabled: !root.scan-busy;
+                    accessible-label: "Discovery provider";
+                }
+                Button {
+                    text: "Discover locations";
+                    enabled: !root.scan-busy;
+                    clicked => {
+                        root.custom-open = false;
+                        root.breakdown-open = false;
+                        root.discover(provider.current-index);
+                    }
+                }
+                if !root.running: Button {
+                    text: root.phase == StoragePhase.completed || root.phase == StoragePhase.cancelled ? "Measure again" : "Measure selected";
+                    enabled: root.can-measure && !root.scan-busy;
+                    clicked => { root.measure(); }
+                }
+                if root.running: Button {
+                    text: "Cancel";
+                    enabled: root.phase != StoragePhase.cancelling;
+                    clicked => { root.cancel(); }
+                }
+                if provider.current-index > 0 && !root.running: Button {
+                    text: root.custom-open ? "Hide custom paths" : "Custom paths…";
+                    enabled: !root.scan-busy;
+                    clicked => { root.custom-open = !root.custom-open; }
+                }
+            }
+            if provider.current-index > 0 && root.custom-open: HorizontalLayout {
+                spacing: 8px;
+                custom := LineEdit {
+                    placeholder-text: "Optional local tool directory";
+                    accessible-label: "Custom tool directory";
+                    enabled: !root.scan-busy;
+                    horizontal-stretch: 1;
+                }
+                Button {
+                    text: "Add location";
+                    enabled: custom.text != "" && !root.scan-busy;
+                    clicked => { root.add-custom(provider.current-index, custom.text); custom.text = ""; }
+                }
+                Button { text: "Clear custom locations"; enabled: !root.scan-busy; clicked => { root.clear-custom(); } }
+            }
+            if root.custom-summary != "": SecondaryText { text: root.custom-summary; }
+            if root.scope != "": SecondaryText { text: root.scope; }
+        }
+    }
+
+    if root.running: Panel {
+        min-height: 110px;
+        vertical-stretch: 0;
+        VerticalLayout {
+            padding: 14px; spacing: 8px; alignment: center;
+            PanelHeading { text: root.phase == StoragePhase.discovering ? "Discovering locations…" :
+                root.phase == StoragePhase.measuring ? "Measuring selected locations…" : "Cancelling…"; }
+            SecondaryText { text: root.progress; }
+            ProgressIndicator { indeterminate: true; }
+        }
+    }
+    if root.notice != "": SecondaryText {
+        text: root.notice;
+        color: root.notice == "Measurement finished." ? Theme.secondary : Theme.warning;
+    }
+    if root.phase == StoragePhase.idle: EmptyState {
+        glyph: Glyph.drive;
+        title: "Discover developer storage";
+        detail: "Preview user-level package caches, managed tools, and protected development data.";
+    }
+
+    if root.phase != StoragePhase.idle && !root.running: VerticalLayout {
+        spacing: 14px;
+        alignment: start;
+        HorizontalLayout {
+            spacing: 12px;
+            ScanMetric { label: "Tools"; value: root.summary.tools; }
+            ScanMetric { label: "Locations"; value: root.summary.locations; }
+            ScanMetric { label: "Measured logical size"; value: root.summary.logical; }
+            ScanMetric { label: "Drives"; value: root.summary.drives; }
+        }
+        HorizontalLayout {
+            spacing: 12px;
+            SecondaryText {
+                text: root.summary.review + " require review or managed handling  •  Protected measured size " + root.summary.protected-size;
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+            }
+            if root.groups.length > 0: Button {
+                text: root.breakdown-open ? "Hide ecosystem breakdown" : "Ecosystem breakdown";
+                clicked => { root.breakdown-open = !root.breakdown-open; }
+            }
+        }
+        if root.groups.length > 0 && root.breakdown-open: Panel {
+            min-height: breakdown.min-height;
+            vertical-stretch: 0;
+            breakdown := VerticalLayout {
+                padding: 14px;
+                spacing: 8px;
+                PanelHeading { text: "Measured storage by ecosystem"; }
+                for group in root.groups: VerticalLayout {
+                    spacing: 4px;
+                    HorizontalLayout {
+                        SecondaryText { text: group.name; horizontal-stretch: 1; }
+                        SecondaryText { text: group.size; }
+                    }
+                    Rectangle {
+                        height: 5px; border-radius: 2px; background: Theme.free;
+                        Rectangle { x: 0; width: parent.width * group.ratio; border-radius: 2px; background: Theme.used; }
+                    }
+                }
+            }
+        }
+        if root.summary.locations == "0": EmptyState {
+            glyph: Glyph.scan;
+            title: "No locations discovered";
+            detail: "Check another provider or supply a documented custom directory.";
+        }
+        if root.summary.locations != "0": storage-results := VerticalLayout {
+            spacing: 10px;
+            function update() {
+                root.filter({ query: query.text, facet: facet.current-index, choice: criterion.current-index, sort: order.current-index });
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                query := LineEdit {
+                    text: root.filters.query;
+                    placeholder-text: "Search tools, resources, or paths";
+                    accessible-label: "Search development storage";
+                    horizontal-stretch: 1;
+                    edited => { storage-results.update(); }
+                }
+                order := ComboBox {
+                    model: ["Largest first", "Smallest first", "Tool name"];
+                    current-index: root.filters.sort;
+                    accessible-label: "Storage sort order";
+                    selected => { storage-results.update(); }
+                }
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                facet := ComboBox {
+                    model: ["Tool", "Ecosystem", "Drive", "Category", "Risk", "Confidence", "Measurement status"];
+                    current-index: root.filters.facet;
+                    accessible-label: "Storage filter field";
+                    selected => { storage-results.update(); }
+                }
+                criterion := ComboBox {
+                    model: root.choices;
+                    current-index: root.filters.choice;
+                    accessible-label: "Storage filter value";
+                    selected => { storage-results.update(); }
+                }
+                Button { text: "Include matches"; enabled: !root.scan-busy; clicked => { root.select-filtered(true); } }
+                Button { text: "Exclude matches"; enabled: !root.scan-busy; clicked => { root.select-filtered(false); } }
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                PanelHeading { text: "Locations"; horizontal-stretch: 1; vertical-alignment: center; }
+                SecondaryText { text: root.page-label; vertical-alignment: center; }
+                Button { text: "Previous"; enabled: root.can-previous; clicked => { root.turn(-1); } }
+                Button { text: "Next"; enabled: root.can-next; clicked => { root.turn(1); } }
+            }
+            if root.rows.length == 0: EmptyState {
+                glyph: Glyph.scan;
+                title: "No matching locations";
+                detail: "Change the search or filter to see other locations.";
+            }
+            for item in root.rows: StorageItem {
+                item: item; details: root.details; busy: root.scan-busy;
+                select(index, checked) => { root.select(index, checked); }
+                inspect(index) => { root.inspect(index); }
+            }
+        }
+        SecondaryText { text: "Sizes are logical file lengths. Hard links, compression, and sparse files can change allocated and reclaimable space."; }
+    }
+}

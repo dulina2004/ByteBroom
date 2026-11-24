@@ -5,6 +5,8 @@
 
 mod app;
 mod detectors;
+#[cfg(windows)]
+mod global_caches;
 mod scanner;
 mod storage;
 #[cfg(windows)]

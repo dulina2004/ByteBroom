@@ -27,9 +27,10 @@ use windows_sys::{
         Storage::FileSystem::{
             CreateFileW, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
             FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-            FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ,
-            FILE_SHARE_WRITE, FILE_TRAVERSE, FileAttributeTagInfo, GetFileInformationByHandleEx,
-            OPEN_EXISTING, SYNCHRONIZE,
+            FILE_ID_INFO, FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE,
+            FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TRAVERSE, FileAttributeTagInfo, FileIdInfo,
+            GetFileInformationByHandleEx, GetFinalPathNameByHandleW, OPEN_EXISTING, SYNCHRONIZE,
+            VOLUME_NAME_GUID,
         },
         System::IO::IO_STATUS_BLOCK,
     },
@@ -42,14 +43,14 @@ const DIRECTORY_BUFFER_WORDS: usize = 1024;
 const SHARE_MODE: u32 = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
 const NAME_OFFSET: usize = offset_of!(FILE_FULL_DIR_INFORMATION, FileName);
 
-pub(super) enum Entry {
-    File(u64, Facts),
+pub(crate) enum Entry {
+    File(u64, Facts, bool),
     Directory(Vec<u16>),
     Link,
     Invalid,
 }
 
-pub(super) struct Directory {
+pub(crate) struct Directory {
     handle: OwnedHandle,
     buffer: Option<Box<[u64; DIRECTORY_BUFFER_WORDS]>>,
     offset: usize,
@@ -57,7 +58,7 @@ pub(super) struct Directory {
 }
 
 impl Directory {
-    pub(super) fn open_root(path: &Path, cancellation: &Cancellation) -> io::Result<Option<Self>> {
+    pub(crate) fn open_root(path: &Path, cancellation: &Cancellation) -> io::Result<Option<Self>> {
         let mut components = path.components();
         let Some(Component::Prefix(prefix)) = components.next() else {
             return Err(invalid_root());
@@ -194,7 +195,11 @@ impl Directory {
         }))
     }
 
-    pub(super) fn next(&mut self, collect_evidence: bool) -> io::Result<Option<Entry>> {
+    pub(crate) fn next(
+        &mut self,
+        collect_evidence: bool,
+        recognize_disk: bool,
+    ) -> io::Result<Option<Entry>> {
         loop {
             if self.offset == self.end && !self.refill()? {
                 return Ok(None);
@@ -204,7 +209,8 @@ impl Directory {
             // to the number of bytes written within this allocation.
             let data =
                 unsafe { std::slice::from_raw_parts(buffer.as_ptr().cast::<u8>(), self.end) };
-            let (advance, entry) = parse_record(&data[self.offset..], collect_evidence)?;
+            let (advance, entry) =
+                parse_record(&data[self.offset..], collect_evidence, recognize_disk)?;
             self.offset = if advance == 0 {
                 self.end
             } else {
@@ -213,6 +219,53 @@ impl Directory {
             if entry.is_some() {
                 return Ok(entry);
             }
+        }
+    }
+
+    pub(crate) fn identity(&self) -> io::Result<(u64, [u8; 16], std::path::PathBuf)> {
+        use std::os::windows::ffi::OsStringExt;
+
+        let mut file = FILE_ID_INFO::default();
+        // SAFETY: the directory handle is live and file is a writable fixed-size output.
+        let success = unsafe {
+            GetFileInformationByHandleEx(
+                self.handle.as_raw_handle(),
+                FileIdInfo,
+                (&mut file as *mut FILE_ID_INFO).cast(),
+                size_of::<FILE_ID_INFO>() as u32,
+            )
+        };
+        if success == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let mut name = vec![0_u16; 512];
+        loop {
+            // SAFETY: the writable UTF-16 buffer has the length passed to Windows.
+            let length = unsafe {
+                GetFinalPathNameByHandleW(
+                    self.handle.as_raw_handle(),
+                    name.as_mut_ptr(),
+                    name.len() as u32,
+                    VOLUME_NAME_GUID,
+                )
+            } as usize;
+            if length == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            if length < name.len() {
+                return Ok((
+                    file.VolumeSerialNumber,
+                    file.FileId.Identifier,
+                    OsString::from_wide(&name[..length]).into(),
+                ));
+            }
+            if length > 32768 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "The volume path is too long to verify.",
+                ));
+            }
+            name.resize(length + 1, 0);
         }
     }
 
@@ -254,7 +307,11 @@ impl Directory {
     }
 }
 
-fn parse_record(data: &[u8], collect_evidence: bool) -> io::Result<(usize, Option<Entry>)> {
+fn parse_record(
+    data: &[u8],
+    collect_evidence: bool,
+    recognize_disk: bool,
+) -> io::Result<(usize, Option<Entry>)> {
     let header = data.get(..NAME_OFFSET).ok_or_else(invalid_record)?;
     // The fixed-size fields below all precede FileName in FILE_FULL_DIR_INFORMATION.
     let read = |offset| u32::from_le_bytes(header[offset..offset + 4].try_into().unwrap());
@@ -294,10 +351,23 @@ fn parse_record(data: &[u8], collect_evidence: bool) -> io::Result<(usize, Optio
             } else {
                 Facts::default()
             };
-            Entry::File(bytes, facts)
+            Entry::File(bytes, facts, recognize_disk && disk_image(name))
         })
     };
     Ok((next, Some(entry)))
+}
+
+fn disk_image(name: &[u8]) -> bool {
+    let wide = name.as_chunks::<2>().0;
+    [".img", ".qcow2", ".vhd", ".vhdx"]
+        .into_iter()
+        .any(|suffix| {
+            wide.len() > suffix.len()
+                && wide[wide.len() - suffix.len()..]
+                    .iter()
+                    .zip(suffix.bytes())
+                    .all(|(unit, byte)| unit[1] == 0 && unit[0].eq_ignore_ascii_case(&byte))
+        })
 }
 
 fn access(enumerate: bool) -> u32 {

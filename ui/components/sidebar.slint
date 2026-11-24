@@ -1,7 +1,7 @@
 import { Theme } from "../theme.slint";
 import { Glyph, Icon } from "icon.slint";
 
-export enum Page { dashboard, scan, artifacts, cleanup, settings }
+export enum Page { dashboard, scan, artifacts, development, cleanup, settings }
 
 component NavigationItem inherits Rectangle {
     in property <string> label;
@@ -126,6 +126,11 @@ export component Sidebar inherits Rectangle {
                 label: "Artifacts"; glyph: Glyph.spark;
                 selected: root.current-page == Page.artifacts;
                 activated => { root.navigate(Page.artifacts); }
+            }
+            NavigationItem {
+                label: "Dev Storage"; glyph: Glyph.drive;
+                selected: root.current-page == Page.development;
+                activated => { root.navigate(Page.development); }
             }
             NavigationItem {
                 label: "Cleanup"; glyph: Glyph.cleanup;

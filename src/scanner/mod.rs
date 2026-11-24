@@ -10,9 +10,9 @@ use std::{
 };
 
 #[cfg(all(test, windows))]
-mod tests;
+pub(crate) mod tests;
 #[cfg(windows)]
-mod windows;
+pub(crate) mod windows;
 
 pub(crate) const TOP_DIRECTORIES: usize = 12;
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(125);
@@ -88,7 +88,9 @@ fn scan_with_interval(
         progress: ScanProgress::default(),
         top: Vec::with_capacity(TOP_DIRECTORIES),
         #[cfg(windows)]
-        developer: Collector::default(),
+        developer: Some(Collector::default()),
+        #[cfg(windows)]
+        avd: None,
         started: Instant::now(),
         last_report: Duration::ZERO,
         interval,
@@ -103,7 +105,10 @@ fn scan_with_interval(
     }
     let partial = !matches!(outcome, ScanOutcome::Completed) || scan.progress.inaccessible != 0;
     #[cfg(windows)]
-    let developer = scan.developer.finish(partial);
+    let developer = scan
+        .developer
+        .expect("project scans collect evidence")
+        .finish(partial);
     #[cfg(not(windows))]
     let developer = Results {
         partial,
@@ -126,7 +131,9 @@ struct Traversal {
     progress: ScanProgress,
     top: Vec<DirectorySize>,
     #[cfg(windows)]
-    developer: Collector,
+    developer: Option<Collector>,
+    #[cfg(windows)]
+    avd: Option<AvdSizes>,
     started: Instant,
     last_report: Duration,
     interval: Duration,
@@ -165,15 +172,26 @@ fn traverse(
     scan: &mut Traversal,
     report: &mut impl FnMut(ScanProgress),
 ) -> io::Result<()> {
-    use std::os::windows::ffi::OsStringExt;
-    use windows::{Directory, Entry};
-
     let _error_mode = crate::windows_fs::ErrorMode::suppress_dialogs()?;
-    let Some(root) = Directory::open_root(&request.root, cancellation)? else {
+    let Some(root) = windows::Directory::open_root(&request.root, cancellation)? else {
         return Ok(());
     };
-    let mut path = request.root.clone();
-    let mut stack = vec![Frame::new(root, Context::root(&path), false)];
+    walk(root, request.root.clone(), None, cancellation, scan, report)
+}
+
+#[cfg(windows)]
+fn walk(
+    root: windows::Directory,
+    mut path: PathBuf,
+    exclusions: Option<&Exclusions>,
+    cancellation: &Cancellation,
+    scan: &mut Traversal,
+    report: &mut impl FnMut(ScanProgress),
+) -> io::Result<()> {
+    use std::os::windows::ffi::OsStringExt;
+    use windows::Entry;
+
+    let mut stack = vec![Frame::new(root, Context::root(&path), false, exclusions)];
     scan.progress.directories = 1;
     let mut root_error = None;
 
@@ -183,20 +201,25 @@ fn traverse(
         }
         let is_root = stack.len() == 1;
         let directory = stack.last_mut().expect("directory stack is not empty");
-        let entry = directory
-            .directory
-            .next(directory.context.wants_file_evidence());
+        let entry = directory.directory.next(
+            scan.developer.is_some() && directory.context.wants_file_evidence(),
+            is_root && scan.avd.is_some(),
+        );
         if cancellation.is_cancelled() {
             break;
         }
         match entry {
-            Ok(Some(Entry::File(bytes, evidence))) => {
+            Ok(Some(Entry::File(bytes, evidence, disk))) => {
                 scan.progress.files += 1;
                 scan.progress.logical_bytes = scan.progress.logical_bytes.saturating_add(bytes);
                 directory.measurement.files += 1;
                 directory.measurement.logical_bytes =
                     directory.measurement.logical_bytes.saturating_add(bytes);
                 directory.context.file(evidence);
+                if disk && let Some(avd) = &mut scan.avd {
+                    avd.disk_bytes = avd.disk_bytes.saturating_add(bytes);
+                    avd.disk_files += 1;
+                }
             }
             Ok(Some(Entry::Link)) => scan.progress.skipped_links += 1,
             Ok(Some(Entry::Invalid)) => {
@@ -204,13 +227,21 @@ fn traverse(
                 directory.measurement.inaccessible += 1;
             }
             Ok(Some(Entry::Directory(name))) => {
+                let exclusion = directory
+                    .exclusions
+                    .and_then(|branch| branch.children.get(&OsString::from_wide(&name)));
+                if exclusion.is_some_and(|branch| branch.skip) {
+                    scan.report_if_due(report);
+                    continue;
+                }
                 let child = directory.directory.open_child(&name, true);
                 if cancellation.is_cancelled() {
                     break;
                 }
                 match child {
                     Ok(Some(child)) => {
-                        let examine = directory.context.examines_children();
+                        let examine =
+                            scan.developer.is_some() && directory.context.examines_children();
                         let component = examine.then(|| OsString::from_wide(&name));
                         let context = directory.context.child(
                             component.as_deref(),
@@ -222,7 +253,7 @@ fn traverse(
                             path.push(component.unwrap_or_else(|| OsString::from_wide(&name)));
                         }
                         scan.progress.directories += 1;
-                        stack.push(Frame::new(child, context, tracked));
+                        stack.push(Frame::new(child, context, tracked, exclusion));
                     }
                     Ok(None) => scan.progress.skipped_links += 1,
                     Err(_) => {
@@ -252,16 +283,22 @@ fn traverse(
 }
 
 #[cfg(windows)]
-struct Frame {
+struct Frame<'a> {
     directory: windows::Directory,
     context: Context,
     measurement: Measurement,
     tracked: bool,
+    exclusions: Option<&'a Exclusions>,
 }
 
 #[cfg(windows)]
-impl Frame {
-    fn new(directory: windows::Directory, context: Context, tracked: bool) -> Self {
+impl<'a> Frame<'a> {
+    fn new(
+        directory: windows::Directory,
+        context: Context,
+        tracked: bool,
+        exclusions: Option<&'a Exclusions>,
+    ) -> Self {
         Self {
             directory,
             context,
@@ -270,30 +307,45 @@ impl Frame {
                 ..Measurement::default()
             },
             tracked,
+            exclusions,
         }
     }
 }
 
 #[cfg(windows)]
-fn finish_frame(stack: &mut Vec<Frame>, path: &mut PathBuf, scan: &mut Traversal, finished: bool) {
+fn finish_frame(
+    stack: &mut Vec<Frame<'_>>,
+    path: &mut PathBuf,
+    scan: &mut Traversal,
+    finished: bool,
+) {
     let frame = stack.pop().expect("directory stack is not empty");
     let measured = frame.measurement;
-    let findings = scan.developer.observe(
-        frame.context,
-        path,
-        scan.progress.directories - 1,
-        measured,
-        finished,
-    );
-    scan.progress.projects += usize::from(findings.project);
-    scan.progress.artifact_candidates += usize::from(findings.candidate);
+    if let Some(collector) = &mut scan.developer {
+        let findings = collector.observe(
+            frame.context,
+            path,
+            scan.progress.directories - 1,
+            measured,
+            finished,
+        );
+        scan.progress.projects += usize::from(findings.project);
+        scan.progress.artifact_candidates += usize::from(findings.candidate);
+    }
     if stack.len() == 1
         && let Some(name) = path.file_name()
     {
-        scan.rank_directory(DirectorySize {
-            name: name.to_owned(),
-            logical_bytes: measured.logical_bytes,
-        });
+        if scan.developer.is_some() {
+            scan.rank_directory(DirectorySize {
+                name: name.to_owned(),
+                logical_bytes: measured.logical_bytes,
+            });
+        }
+        if let Some(avd) = &mut scan.avd
+            && name.as_encoded_bytes().eq_ignore_ascii_case(b"snapshots")
+        {
+            avd.snapshot_bytes = Some(measured.logical_bytes);
+        }
     }
     if frame.tracked {
         path.pop();
@@ -307,6 +359,75 @@ fn finish_frame(stack: &mut Vec<Frame>, path: &mut PathBuf, scan: &mut Traversal
         parent.measurement.directories += measured.directories;
         parent.measurement.inaccessible += measured.inaccessible;
     }
+}
+
+#[cfg(windows)]
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct AvdSizes {
+    pub(crate) disk_files: u64,
+    pub(crate) disk_bytes: u64,
+    pub(crate) snapshot_bytes: Option<u64>,
+}
+
+/// Directory boundaries relative to an already validated measurement root.
+#[cfg(windows)]
+#[derive(Default)]
+pub(crate) struct Exclusions {
+    children: std::collections::HashMap<OsString, Self>,
+    skip: bool,
+}
+
+#[cfg(windows)]
+impl Exclusions {
+    pub(crate) fn insert(&mut self, relative: &std::path::Path) {
+        let mut branch = self;
+        for name in relative {
+            branch = branch.children.entry(name.to_owned()).or_default();
+        }
+        branch.skip = true;
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.children.is_empty()
+    }
+}
+
+#[cfg(windows)]
+pub(crate) fn measure(
+    root: windows::Directory,
+    path: PathBuf,
+    avd: bool,
+    exclusions: &Exclusions,
+    cancellation: &Cancellation,
+    mut report: impl FnMut(ScanProgress),
+) -> (ScanProgress, ScanOutcome, Option<AvdSizes>) {
+    let mut scan = Traversal {
+        progress: ScanProgress::default(),
+        top: Vec::new(),
+        developer: None,
+        avd: avd.then(AvdSizes::default),
+        started: Instant::now(),
+        last_report: Duration::ZERO,
+        interval: PROGRESS_INTERVAL,
+    };
+    let result = if cancellation.is_cancelled() {
+        Ok(())
+    } else {
+        walk(
+            root,
+            path,
+            (!exclusions.is_empty()).then_some(exclusions),
+            cancellation,
+            &mut scan,
+            &mut report,
+        )
+    };
+    let outcome = if cancellation.is_cancelled() {
+        ScanOutcome::Cancelled
+    } else {
+        result.map_or_else(ScanOutcome::Failed, |()| ScanOutcome::Completed)
+    };
+    (scan.progress, outcome, scan.avd)
 }
 
 #[cfg(not(windows))]
